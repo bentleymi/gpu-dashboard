@@ -1286,17 +1286,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="analytics-stat">
         <div class="analytics-stat-label">Total Tokens</div>
         <div class="analytics-stat-value" id="stat-total">--</div>
-        <div class="analytics-stat-sub">all time</div>
+        <div class="analytics-stat-sub" id="stat-range-label">last 7 days</div>
       </div>
       <div class="analytics-stat">
         <div class="analytics-stat-label">Input Tokens</div>
         <div class="analytics-stat-value" id="stat-input">--</div>
-        <div class="analytics-stat-sub">context sent</div>
+        <div class="analytics-stat-sub" id="stat-input-label">last 7 days</div>
       </div>
       <div class="analytics-stat">
         <div class="analytics-stat-label">Output Tokens</div>
         <div class="analytics-stat-value" id="stat-output">--</div>
-        <div class="analytics-stat-sub">generated</div>
+        <div class="analytics-stat-sub" id="stat-output-label">last 7 days</div>
       </div>
       <div class="analytics-stat">
         <div class="analytics-stat-label">Power Cost/hr</div>
@@ -1547,6 +1547,10 @@ function setRange(days) {
                   days === 0 && label === 'All';
     b.classList.toggle('active', match);
   });
+  const rangeLabel = days === 0 ? 'all time' : 'last ' + days + ' days';
+  document.getElementById('stat-range-label').textContent = rangeLabel;
+  document.getElementById('stat-input-label').textContent = rangeLabel;
+  document.getElementById('stat-output-label').textContent = rangeLabel;
   refreshTokens();
 }
 
