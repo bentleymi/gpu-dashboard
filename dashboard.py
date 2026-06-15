@@ -1578,9 +1578,16 @@ async function refreshTokens() {
     const d = await r.json();
     if (d.error) return;
     tokenData = d;
-    document.getElementById('stat-total').textContent = fmtNum(d.total_tokens);
-    document.getElementById('stat-input').textContent = fmtNum(d.total_input);
-    document.getElementById('stat-output').textContent = fmtNum(d.total_output);
+    // Sum totals from the filtered day range (not all-time)
+    let rangeInput = 0, rangeOutput = 0, rangeTotal = 0;
+    for (const v of Object.values(d.by_day)) {
+      rangeInput += v.input;
+      rangeOutput += v.output;
+      rangeTotal += v.total;
+    }
+    document.getElementById('stat-total').textContent = fmtNum(rangeTotal);
+    document.getElementById('stat-input').textContent = fmtNum(rangeInput);
+    document.getElementById('stat-output').textContent = fmtNum(rangeOutput);
 
     // Daily chart
     const days = Object.keys(d.by_day);
