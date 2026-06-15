@@ -1279,7 +1279,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
       <div class="kwh-row" style="margin-left:auto">
         <label>$/kWh</label>
-        <input type="number" id="kwh-rate" value="0.12" step="0.01" min="0" onchange="updateCost()">
+        <input type="number" id="kwh-rate" value="0.12" step="0.01" min="0" onchange="updateCost(); updateDailyChart()">
       </div>
     </div>
     <div class="analytics-stats">
@@ -1311,7 +1311,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
     <div class="analytics-charts">
       <div class="analytics-chart-box">
-        <div class="analytics-chart-title">Tokens per Day (last 30 days)</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div class="analytics-chart-title" style="margin-bottom:0" id="chart-daily-title">Tokens per Day</div>
+          <div style="display:flex;gap:3px">
+            <button class="range-btn active" id="toggle-tokens" onclick="setChartMode('tokens')">Tokens</button>
+            <button class="range-btn" id="toggle-cost" onclick="setChartMode('cost')">$ Cost</button>
+          </div>
+        </div>
         <canvas id="chart-daily"></canvas>
       </div>
       <div class="analytics-chart-box">
@@ -1525,11 +1531,13 @@ async function toggleLog(id) {
 
 // ── Token analytics ──────────────────────────────────────────────
 let tokenData = null;
+let powerByDay = {};
 let currentPowerW = 0;
 let todayWh = 0;
 let chartDaily = null;
 let chartModels = null;
 let currentRange = 7;
+let chartMode = 'tokens';
 
 function fmtNum(n) {
   if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
@@ -1571,8 +1579,46 @@ async function refreshPower() {
     const r = await fetch('/api/power');
     const d = await r.json();
     todayWh = d.today_wh || 0;
+    powerByDay = d.by_day || {};
     updateCost();
   } catch(e) {}
+}
+
+function setChartMode(mode) {
+  chartMode = mode;
+  document.getElementById('toggle-tokens').classList.toggle('active', mode === 'tokens');
+  document.getElementById('toggle-cost').classList.toggle('active', mode === 'cost');
+  updateDailyChart();
+}
+
+function updateDailyChart() {
+  if (!chartDaily || !tokenData) return;
+  const rate = parseFloat(document.getElementById('kwh-rate').value) || 0.12;
+  const days = Object.keys(tokenData.by_day);
+  const shortDays = days.map(d => d.slice(5));
+
+  if (chartMode === 'tokens') {
+    document.getElementById('chart-daily-title').textContent = 'Tokens per Day';
+    chartDaily.data.labels = shortDays;
+    chartDaily.data.datasets = [
+      { label: 'Input', data: days.map(k => tokenData.by_day[k].input), backgroundColor: 'rgba(102,126,234,0.7)', stack: 's' },
+      { label: 'Output', data: days.map(k => tokenData.by_day[k].output), backgroundColor: 'rgba(34,197,94,0.7)', stack: 's' },
+    ];
+    chartDaily.options.scales.y.ticks.callback = v => fmtNum(v);
+  } else {
+    document.getElementById('chart-daily-title').textContent = 'Power Cost per Day ($)';
+    chartDaily.data.labels = shortDays;
+    chartDaily.data.datasets = [
+      { label: 'Cost ($)', data: days.map(k => {
+          const wh = powerByDay[k] || 0;
+          return +((wh / 1000) * rate).toFixed(4);
+        }),
+        backgroundColor: 'rgba(249,115,22,0.7)', stack: 's'
+      },
+    ];
+    chartDaily.options.scales.y.ticks.callback = v => '$' + v.toFixed(3);
+  }
+  chartDaily.update();
 }
 
 async function refreshTokens() {
@@ -1595,21 +1641,12 @@ async function refreshTokens() {
 
     // Daily chart
     const days = Object.keys(d.by_day);
-    const dayInputs = days.map(k => d.by_day[k].input);
-    const dayOutputs = days.map(k => d.by_day[k].output);
-    const shortDays = days.map(d => d.slice(5));
-
+    const shortDays = days.map(k => k.slice(5));
     if (!chartDaily) {
       const ctx = document.getElementById('chart-daily').getContext('2d');
       chartDaily = new Chart(ctx, {
         type: 'bar',
-        data: {
-          labels: shortDays,
-          datasets: [
-            { label: 'Input', data: dayInputs, backgroundColor: 'rgba(102,126,234,0.7)', stack: 's' },
-            { label: 'Output', data: dayOutputs, backgroundColor: 'rgba(34,197,94,0.7)', stack: 's' },
-          ]
-        },
+        data: { labels: shortDays, datasets: [] },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { labels: { color: '#71717a', font: { size: 10 } } } },
@@ -1619,12 +1656,8 @@ async function refreshTokens() {
           }
         }
       });
-    } else {
-      chartDaily.data.labels = shortDays;
-      chartDaily.data.datasets[0].data = dayInputs;
-      chartDaily.data.datasets[1].data = dayOutputs;
-      chartDaily.update();
     }
+    updateDailyChart();
 
     // Model chart
     const models = Object.keys(d.by_model);
