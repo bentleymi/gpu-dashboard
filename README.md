@@ -105,6 +105,47 @@ logs/power_usage.json # Accumulated watt-hours per day (real samples)
 logs/power_history.csv # CSV log of power samples for backfill reference
 ```
 
-## Hardware
+## Managing Models
 
-Tested on NVIDIA RTX PRO 6000 Blackwell Workstation Edition (96 GB VRAM). Adjust power profiles in `MODEL_POWER_PROFILES` for different hardware.
+### Via the Dashboard UI
+
+Use the Start/Stop buttons on each model card. Models auto-stop other LLM/Video models to free GPU memory when started.
+
+### Adding a new model
+
+Add an entry to the `MODELS` dictionary at the top of `dashboard.py`. Example:
+
+```python
+"my_model": {
+    "name": "My Custom Model",
+    "description": "Description of what it does",
+    "port": 5555,
+    "cmd": ["/path/to/venv/bin/python", "my_server.py"],
+    "cwd": "/path/to/app",
+    "env": {},
+    "protocol": "http",
+    "category": "LLM",          # Image, Video, Audio, LLM, or Tools
+    "icon": "rocket",
+    "color": "#ff6600",
+    "tags": ["text-to-text"],
+    "supports_offload": False,
+},
+```
+
+Required fields: `name`, `port`, `cmd`, `cwd`, `protocol`, `category`, `icon`, `color`, `tags`.
+
+### Adding a power profile
+
+If the model isn't in `MODEL_POWER_PROFILES`, add it for accurate cost estimation:
+
+```python
+"my_model": {
+    "watts": 350,         # Power draw when actively processing
+    "idle_watts": 30,     # Baseline GPU power when loaded
+    "desc": "My model description",
+},
+```
+
+### Removing a model
+
+Remove its entry from the `MODELS` dictionary and from `MODEL_POWER_PROFILES` if present. Restart the dashboard.
