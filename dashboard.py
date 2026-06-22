@@ -479,28 +479,23 @@ MODELS = {
         "name": "Qwen3.6 35B Uncensored (Q8)",
         "description": "llama.cpp — Q8_K_P, 43GB, Qwen3.6 35B-A3B uncensored, 256K context",
         "port": 8086,
-        "systemd_service": "qwen36-35b-uncensored.service",
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/start-qwen36-35b-uncensored.sh"],
+        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_sata/models/qwen36-35b-uncensored/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
+                "--alias", "qwen36-35b-uncensored",
+                "--ctx-size", "262144",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "8086",
+                "--jinja",
+                "--chat-template-kwargs", '{"enable_thinking":false}',
+                "--threads", "16"],
         "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
         "icon": "zap",
         "color": "#f97316",
-        "tags": ["text-to-text", "text-to-code", "agents"],
-        "supports_offload": False,
-    },
-    "qwen36_35b_uncensored_q6": {
-        "name": "Qwen3.6 35B Uncensored (Q6)",
-        "description": "llama.cpp — Q6_K_P, 31GB, Qwen3.6 35B-A3B uncensored, 256K context, pairs with Coder-Next",
-        "port": 8087,
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/start-qwen36-35b-uncensored-q6.sh"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
-        "env": {},
-        "protocol": "http",
-        "category": "LLM",
-        "icon": "zap",
-        "color": "#fb923c",
         "tags": ["text-to-text", "text-to-code", "agents"],
         "supports_offload": False,
     },
@@ -614,43 +609,9 @@ log_files: dict[str, object] = {}
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────
-import threading, json as _json_mod, datetime as _dt_mod, csv
+import threading, json as _json_mod, datetime as _dt_mod
 
 POWER_LOG = "/mnt/raid1_sata/JanusPro7b/logs/power_usage.json"
-POWER_CSV = "/mnt/raid1_sata/JanusPro7b/logs/power_history.csv"
-
-# Model-specific power profiles (watts) — estimated from nvidia-smi observations
-# These represent the ADDITIONAL power draw above idle when a model is active
-MODEL_POWER_PROFILES = {
-    # llama.cpp models (GPU memory footprint drives power)
-    "qwen35-122b": {"watts": 450, "idle_watts": 40, "desc": "122B Q5, ~88GB VRAM, single GPU"},
-    "qwen35-122b-q4": {"watts": 500, "idle_watts": 50, "desc": "122B Q4, ~75GB VRAM, 4 parallel agents"},
-    "qwen36-35b-uncensored": {"watts": 280, "idle_watts": 30, "desc": "35B Q8, ~43GB VRAM"},
-    "qwen3-coder-next": {"watts": 250, "idle_watts": 25, "desc": "80B MoE Q6, ~70GB VRAM"},
-    "qwen3-coder-next-q4": {"watts": 300, "idle_watts": 35, "desc": "80B MoE Q4, ~55GB VRAM, 4 parallel"},
-    # vLLM models
-    "qwen36-35b": {"watts": 400, "idle_watts": 35, "desc": "35B MoE vLLM"},
-    "qwen36-27b": {"watts": 380, "idle_watts": 35, "desc": "27B vLLM"},
-    "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B": {"watts": 380, "idle_watts": 35, "desc": "32B vLLM"},
-    # Image/Video models (gradio)
-    "janus": {"watts": 350, "idle_watts": 30, "desc": "Janus Pro 7B image gen"},
-    "flux": {"watts": 350, "idle_watts": 30, "desc": "FLUX Klein 9B"},
-    "ltx": {"watts": 350, "idle_watts": 30, "desc": "LTX-2 Video"},
-    # Idle GPU baseline
-    "idle": {"watts": 25, "idle_watts": 25, "desc": "GPU idle baseline"},
-}
-
-# Map modelID from opencode DB to power profile key
-def _model_to_power_key(model_id: str) -> str:
-    """Map an opencode modelID to a power profile key."""
-    if model_id in MODEL_POWER_PROFILES:
-        return model_id
-    # Try matching by substring
-    for key in MODEL_POWER_PROFILES:
-        if key in model_id or model_id in key:
-            return key
-    # Check for llama.cpp models by VRAM usage
-    return "idle"  # fallback
 
 def _load_power_log() -> dict:
     try:
@@ -664,224 +625,27 @@ def _save_power_log(data: dict):
     except Exception:
         pass
 
-def _append_power_csv(date_str: str, watts: float, model: str = "unknown"):
-    """Append a power sample to CSV for historical backfill."""
-    try:
-        file_exists = os.path.isfile(POWER_CSV)
-        with open(POWER_CSV, "a", newline="") as f:
-            writer = csv.writer(f)
-            if not file_exists:
-                writer.writerow(["timestamp", "date", "power_watts", "model", "sample_type"])
-            writer.writerow([
-                _dt_mod.datetime.now().isoformat(),
-                date_str,
-                f"{watts:.1f}",
-                model,
-                "sample"
-            ])
-    except Exception:
-        pass
-
 def _power_sampler():
-    """Sample GPU power every 30s, accumulate per-day, and archive completed days."""
+    """Sample GPU power every 60s and accumulate watt-hours per day."""
     import time
-    last_day = None
-    
     while True:
         try:
-            today = _dt_mod.date.today().isoformat()
-            
-            # Archive yesterday's data if we've moved to a new day
-            if last_day and last_day != today:
-                data = _load_power_log()
-                yesterday_wh = data.pop(last_day, 0)
-                if yesterday_wh > 0:
-                    # Write yesterday to CSV for persistence
-                    _append_power_csv(last_day, yesterday_wh * 60, "historical")
-                _save_power_log(data)
-            
-            # Sample power
             out = subprocess.run(
                 ["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5,
             )
             watts = float(out.stdout.strip())
-            
+            today = _dt_mod.date.today().isoformat()
             data = _load_power_log()
             # watt-hours = watts * (1min / 60min)
             data[today] = data.get(today, 0) + watts / 60.0
             _save_power_log(data)
-            
-            # Also log to CSV for backfill
-            _append_power_csv(today, watts, "live")
-            
-            last_day = today
         except Exception:
             pass
-        time.sleep(30)
+        time.sleep(60)
 
 _power_thread = threading.Thread(target=_power_sampler, daemon=True)
 _power_thread.start()
-
-
-def _backfill_power_from_tokens() -> dict:
-    """Backfill historical power data using token counts from opencode DB and model power profiles.
-    
-    Uses a two-tier approach:
-    1. If overlap days exist (power data + token data), calibrate wh-per-mmt from real measurements
-    2. Otherwise, estimate from model wattage × active hours (derived from token count / throughput)
-       with a per-day cap to reflect realistic usage patterns
-    """
-    import sqlite3
-    db_path = "/root/.local/share/opencode/opencode.db"
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        rows = conn.execute(
-            "SELECT time_created, data FROM message WHERE json_extract(data, '$.role') = 'assistant'"
-        ).fetchall()
-        conn.close()
-    except Exception:
-        return {}
-    
-    # Build per-day, per-model token counts
-    day_model_tokens: dict[str, dict[str, int]] = {}
-    for time_created, data_str in rows:
-        try:
-            d = _json_mod.loads(data_str)
-        except Exception:
-            continue
-        tokens = d.get("tokens") or {}
-        tot = tokens.get("total", 0) or (tokens.get("input", 0) + tokens.get("output", 0))
-        if tot == 0:
-            continue
-        model_id = d.get("modelID", "unknown")
-        day = _dt_mod.datetime.fromtimestamp(time_created / 1000).strftime("%Y-%m-%d")
-        
-        day_model_tokens.setdefault(day, {})
-        day_model_tokens[day][model_id] = day_model_tokens[day].get(model_id, 0) + tot
-    
-    power_data = _load_power_log()
-    token_days = sorted(day_model_tokens.keys())
-    
-    # Find overlap days and compute calibrated wh-per-mmt ratios
-    overlap_days = [d for d in token_days if d in power_data]
-    recent_overlap = overlap_days[-14:] if len(overlap_days) >= 14 else overlap_days
-    
-    model_wh_per_mmt: dict[str, list[tuple[float, float]]] = {}
-    
-    for day in recent_overlap:
-        day_tokens = day_model_tokens.get(day, {})
-        if not day_tokens:
-            continue
-        day_wh = power_data.get(day, 0)
-        if day_wh == 0:
-            continue
-        
-        total_day_tokens = sum(day_tokens.values())
-        
-        for model_id, model_tokens in day_tokens.items():
-            power_key = _model_to_power_key(model_id)
-            profile = MODEL_POWER_PROFILES.get(power_key)
-            if not profile:
-                continue
-            
-            model_weighted = model_tokens * profile["watts"]
-            total_weighted = sum(
-                mt * MODEL_POWER_PROFILES.get(_model_to_power_key(mid), MODEL_POWER_PROFILES["idle"])["watts"]
-                for mid, mt in day_tokens.items()
-                if _model_to_power_key(mid) in MODEL_POWER_PROFILES
-            )
-            
-            if total_weighted == 0:
-                continue
-            
-            model_wh = (model_weighted / total_weighted) * day_wh
-            model_mmt = model_tokens / 1e6
-            
-            model_wh_per_mmt.setdefault(power_key, [])
-            model_wh_per_mmt[power_key].append((model_mmt, model_wh))
-    
-    # Average wh per million tokens per model type
-    avg_wh_per_mmt: dict[str, float] = {}
-    for key, samples in model_wh_per_mmt.items():
-        total_wh = sum(s[1] for s in samples)
-        total_mmt = sum(s[0] for s in samples)
-        if total_mmt > 0 and len(samples) >= 3:
-            # Need at least 3 overlap days for reliable calibration
-            avg_wh_per_mmt[key] = total_wh / total_mmt
-    
-    import math as _math_mod
-    
-    # Token-per-minute estimates per model type
-    def _tok_per_min(model_id: str) -> float:
-        if "122b" in model_id.lower() or "122B" in model_id:
-            return 800
-        elif "35b" in model_id.lower() or "35B" in model_id:
-            return 1500
-        elif "27b" in model_id.lower() or "27B" in model_id:
-            return 1200
-        elif "32b" in model_id.lower() or "32B" in model_id:
-            return 1000
-        return 500
-    
-    # Estimate active hours per day based on token volume and model type
-    def _estimate_daily_hours(model_id: str, tokens: int) -> float:
-        """Estimate hours of GPU activity based on token count."""
-        if tokens < 100000:
-            return max(0.5, tokens / 100000 * 2)
-        elif tokens < 1000000:
-            return 2 + (tokens - 100000) / 900000 * 4
-        elif tokens < 10000000:
-            return 6 + (tokens - 1000000) / 9000000 * 6
-        else:
-            return min(18, 12 + (_math_mod.log2(max(1, tokens / 10000000)) * 3))
-    
-    # Backfill ALL days without real power data
-    backfill = {}
-    for day, day_tokens in day_model_tokens.items():
-        if day in power_data:
-            continue
-        
-        total_day_wh = 0
-        max_active_hours = 0
-        
-        for model_id, model_tokens in day_tokens.items():
-            power_key = _model_to_power_key(model_id)
-            profile = MODEL_POWER_PROFILES.get(power_key)
-            if not profile:
-                continue
-            
-            # Use calibrated wh-per-mmt if we have overlap data
-            if power_key in avg_wh_per_mmt and model_tokens > 0:
-                model_wh = avg_wh_per_mmt[power_key] * (model_tokens / 1e6)
-                total_day_wh += model_wh
-                # Also estimate hours for idle baseline calculation
-                hours = _estimate_daily_hours(model_id, model_tokens)
-                max_active_hours = max(max_active_hours, hours)
-            else:
-                # Estimate from watts × hours + idle baseline
-                hours = _estimate_daily_hours(model_id, model_tokens)
-                max_active_hours = max(max_active_hours, hours)
-                active_wh = hours * profile["watts"]
-                total_day_wh += active_wh
-        
-        # Add idle baseline for remaining hours
-        idle_hours = max(0, 24 - max_active_hours)
-        total_day_wh += idle_hours * MODEL_POWER_PROFILES["idle"]["watts"]
-        
-        backfill[day] = total_day_wh
-    
-    return backfill
-
-
-def get_all_power_data() -> dict:
-    """Get combined real + backfilled power data."""
-    real_data = _load_power_log()
-    backfill_data = _backfill_power_from_tokens()
-    
-    # Merge: real data takes precedence
-    all_data = {**backfill_data, **real_data}
-    return all_data
 
 
 def is_port_open(port: int) -> bool:
@@ -908,24 +672,12 @@ def get_model_status(model_id: str) -> dict:
 
 @app.get("/api/power")
 def api_power():
-    """Return historical watt-hour usage per day (real + backfilled)."""
-    data = get_all_power_data()
+    """Return historical watt-hour usage per day."""
+    data = _load_power_log()
     sorted_data = dict(sorted(data.items()))
     today = _dt_mod.date.today().isoformat()
     today_wh = data.get(today, 0)
-    # Add backfill info
-    real_days = set(_load_power_log().keys())
-    backfill_days = set(get_all_power_data().keys()) - real_days
-    has_backfill = len(backfill_days) > 0
-    return JSONResponse({
-        "by_day": sorted_data,
-        "today_wh": today_wh,
-        "total_wh": sum(sorted_data.values()),
-        "total_cost_estimate": 0,  # computed client-side
-        "has_backfill": has_backfill,
-        "backfill_days": len(backfill_days),
-        "real_days": len(real_days),
-    })
+    return JSONResponse({"by_day": sorted_data, "today_wh": today_wh})
 
 
 @app.get("/api/tokens")
@@ -1556,11 +1308,6 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="analytics-stat-value" id="stat-cost-day">--</div>
         <div class="analytics-stat-sub">power only</div>
       </div>
-      <div class="analytics-stat">
-        <div class="analytics-stat-label">Total Cost (Range)</div>
-        <div class="analytics-stat-value" id="stat-cost-total">--</div>
-        <div class="analytics-stat-sub" id="stat-cost-total-sub">power only, includes backfill</div>
-      </div>
     </div>
     <div class="analytics-charts">
       <div class="analytics-chart-box">
@@ -1569,7 +1316,6 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div style="display:flex;gap:3px">
             <button class="range-btn active" id="toggle-tokens" onclick="setChartMode('tokens')">Tokens</button>
             <button class="range-btn" id="toggle-cost" onclick="setChartMode('cost')">$ Cost</button>
-            <button class="range-btn" id="toggle-power" onclick="setChartMode('power')">Power (kWh)</button>
           </div>
         </div>
         <canvas id="chart-daily"></canvas>
@@ -1786,7 +1532,6 @@ async function toggleLog(id) {
 // ── Token analytics ──────────────────────────────────────────────
 let tokenData = null;
 let powerByDay = {};
-let powerMeta = {};
 let currentPowerW = 0;
 let todayWh = 0;
 let chartDaily = null;
@@ -1815,8 +1560,6 @@ function setRange(days) {
   document.getElementById('stat-input-label').textContent = rangeLabel;
   document.getElementById('stat-output-label').textContent = rangeLabel;
   refreshTokens();
-  // Re-fetch power data to ensure alignment with new range
-  refreshPower();
 }
 
 function updateCost() {
@@ -1837,57 +1580,14 @@ async function refreshPower() {
     const d = await r.json();
     todayWh = d.today_wh || 0;
     powerByDay = d.by_day || {};
-    powerMeta = { has_backfill: d.has_backfill || false, backfill_days: d.backfill_days || 0, real_days: d.real_days || 0 };
     updateCost();
-    if (tokenData) {
-      updateTotalCost();
-      updateDailyChart();
-    }
   } catch(e) {}
-}
-
-function updateTotalCost() {
-  const rate = parseFloat(document.getElementById('kwh-rate').value) || 0.12;
-  if (!tokenData) return;
-  
-  // Calculate total cost for the current range
-  // Only sum power for days that exist in the token data (i.e., days with actual usage)
-  let totalWh = 0;
-  const days = Object.keys(tokenData.by_day || {});
-  for (const day of days) {
-    totalWh += powerByDay[day] || 0;
-  }
-  
-  const totalCost = (totalWh / 1000) * rate;
-  document.getElementById('stat-cost-total').textContent = '$' + totalCost.toFixed(2);
-  
-  // Show range info
-  let rangeInfo = '';
-  if (currentRange === 0) {
-    rangeInfo = 'all time';
-  } else {
-    rangeInfo = 'last ' + currentRange + ' days';
-  }
-  
-  let subParts = ['power only', rangeInfo];
-  if (powerMeta.has_backfill) {
-    subParts.push(powerMeta.backfill_days + 'd backfilled, ' + powerMeta.real_days + 'd real');
-  }
-  document.getElementById('stat-cost-total-sub').textContent = subParts.join(' · ');
-}
-
-// Helper to check if a day is in real power data (before backfill)
-function _loadPowerLog() {
-  // powerMeta stores real_days count, but we don't have the actual set
-  // For the sub-label, we just use the metadata counts
-  return { _real_days: powerMeta.real_days || 0 };
 }
 
 function setChartMode(mode) {
   chartMode = mode;
   document.getElementById('toggle-tokens').classList.toggle('active', mode === 'tokens');
   document.getElementById('toggle-cost').classList.toggle('active', mode === 'cost');
-  document.getElementById('toggle-power').classList.toggle('active', mode === 'power');
   updateDailyChart();
 }
 
@@ -1905,7 +1605,7 @@ function updateDailyChart() {
       { label: 'Output', data: days.map(k => tokenData.by_day[k].output), backgroundColor: 'rgba(34,197,94,0.7)', stack: 's' },
     ];
     chartDaily.options.scales.y.ticks.callback = v => fmtNum(v);
-  } else if (chartMode === 'cost') {
+  } else {
     document.getElementById('chart-daily-title').textContent = 'Power Cost per Day ($)';
     chartDaily.data.labels = shortDays;
     chartDaily.data.datasets = [
@@ -1917,18 +1617,6 @@ function updateDailyChart() {
       },
     ];
     chartDaily.options.scales.y.ticks.callback = v => '$' + v.toFixed(3);
-  } else {
-    document.getElementById('chart-daily-title').textContent = 'Power Consumption per Day (kWh)';
-    chartDaily.data.labels = shortDays;
-    chartDaily.data.datasets = [
-      { label: 'Power (kWh)', data: days.map(k => {
-          const wh = powerByDay[k] || 0;
-          return +(wh / 1000).toFixed(3);
-        }),
-        backgroundColor: 'rgba(168,85,247,0.7)', stack: 's'
-      },
-    ];
-    chartDaily.options.scales.y.ticks.callback = v => v.toFixed(3) + ' kWh';
   }
   chartDaily.update();
 }
@@ -1970,9 +1658,6 @@ async function refreshTokens() {
       });
     }
     updateDailyChart();
-    if (powerByDay && Object.keys(powerByDay).length > 0) {
-      updateTotalCost();
-    }
 
     // Model chart
     const models = Object.keys(d.by_model);
