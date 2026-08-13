@@ -13,7 +13,7 @@ MODELS = {
         "description": "Multimodal understanding & text-to-image generation",
         "port": 4343,
         "cmd": ["/usr/bin/python3", "app.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {"CUDA_LAUNCH_BLOCKING": "1"},
         "protocol": "https",
         "category": "Image",
@@ -26,8 +26,8 @@ MODELS = {
         "name": "FLUX Klein 9B",
         "description": "Fast image generation & style transfer",
         "port": 4242,
-        "cmd": ["/mnt/raid1_sata/JanusPro7b/flux-venv/bin/python", "flux_app.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/flux-venv/bin/python", "flux_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "Image",
@@ -36,12 +36,26 @@ MODELS = {
         "tags": ["text-to-image", "image-to-image"],
         "supports_offload": True,
     },
+    "flux_uncensored": {
+        "name": "FLUX Klein 9B Uncensored",
+        "description": "Uncensored image generation with Lustly.ai LoRA — unrestricted content",
+        "port": 4243,
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/flux-venv/bin/python", "flux_uncensored_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
+        "env": {},
+        "protocol": "https",
+        "category": "Image",
+        "icon": "image",
+        "color": "#e74c3c",
+        "tags": ["text-to-image", "image-to-image", "uncensored"],
+        "supports_offload": True,
+    },
     "qwen_edit_general": {
         "name": "Qwen Image Edit (General)",
         "description": "General purpose image editing: upload + prompt → edited result (Qwen/Qwen-Image-Edit-2511)",
         "port": 4041,
-        "cmd": ["/mnt/raid1_sata/JanusPro7b/qwen-venv/bin/python", "qwen_edit_general.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/qwen-venv/bin/python", "qwen_edit_general.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "Image",
@@ -54,8 +68,8 @@ MODELS = {
         "name": "Qwen Image Edit (Dual)",
         "description": "Multi-image fusion: combine 2 images with prompt guidance (person merging, scene fusion)",
         "port": 4042,
-        "cmd": ["/mnt/raid1_sata/JanusPro7b/qwen-venv/bin/python", "qwen_edit_dual.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/qwen-venv/bin/python", "qwen_edit_dual.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "Image",
@@ -68,8 +82,8 @@ MODELS = {
         "name": "Qwen Image Edit (Angles)",
         "description": "Multi-angle camera control for 3D object rotation (specialized LoRA)",
         "port": 4040,
-        "cmd": ["/mnt/raid1_sata/JanusPro7b/qwen-venv/bin/python", "qwen_app.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/qwen-venv/bin/python", "qwen_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "Image",
@@ -92,13 +106,27 @@ MODELS = {
         "tags": ["text-to-image", "sota"],
         "supports_offload": False,
     },
+    "flux2_uncensored": {
+        "name": "FLUX.2 Klein Uncensored 9B",
+        "description": "FLUX.2 Klein base 9B uncensored - fast image generation",
+        "port": 9002,
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/flux2-uncensored-venv/bin/python", "flux2_uncensored_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
+        "env": {},
+        "protocol": "https",
+        "category": "Image",
+        "icon": "image",
+        "color": "#ec4899",
+        "tags": ["text-to-image", "uncensored"],
+        "supports_offload": True,
+    },
     # --- Video Generation ---
     "ltx": {
         "name": "LTX-2 Video",
         "description": "Audio-video generation from text and images (19B)",
         "port": 4141,
-        "cmd": ["/mnt/raid1_sata/JanusPro7b/ltx-venv/bin/python", "ltx_app.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/ltx-venv/bin/python", "ltx_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"},
         "protocol": "https",
         "category": "Video",
@@ -119,6 +147,34 @@ MODELS = {
         "icon": "clapperboard",
         "color": "#e879f9",
         "tags": ["text-to-video", "image-to-video"],
+    },
+    "wan_uncensored": {
+        "name": "WAN 2.2 NSFW LoRAs",
+        "description": "Uncensored image-to-video with specialized NSFW LoRAs",
+        "port": 4245,
+        "cmd": ["/mnt/raid1_sata/wan2.2-TI2V-5B/venv/bin/python", "wan2.2_nsfw_loras_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
+        "env": {},
+        "protocol": "https",
+        "category": "Video",
+        "icon": "clapperboard",
+        "color": "#e67e22",
+        "tags": ["text-to-video", "image-to-video", "uncensored"],
+        "supports_offload": True,
+    },
+    "ltx_nsFW": {
+        "name": "LTX 2.3 NSFW Motion",
+        "description": "NSFW motion LoRA for LTX video generation — stacked LoRAs",
+        "port": 4246,
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/ltx-venv/bin/python", "ltx_nsfw_lora_app.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
+        "env": {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True", "CPU_OFFLOAD": "1", "CUDA_LAUNCH_BLOCKING": "0"},
+        "protocol": "https",
+        "category": "Video",
+        "icon": "film",
+        "color": "#8e44ad",
+        "tags": ["text-to-video", "image-to-video", "nsfw"],
+        "supports_offload": True,
     },
     "video_gen": {
         "name": "Video Models (I2V)",
@@ -172,8 +228,9 @@ MODELS = {
         "name": "RVC Audio",
         "description": "Real-time voice conversion & TTS API",
         "port": 8080,
-        "cmd": ["/mnt/raid1_sata/vcs-audio-5.0.0/venv/bin/python", "-m", "src.api.main"],
-        "cwd": "/mnt/raid1_sata/vcs-audio-5.0.0",
+        "systemd_service": "rvc-audio.service",
+        "cmd": ["/mnt/raid1_nvme/vcs-audio-5.0.0/venv/bin/python", "-m", "src.api.main"],
+        "cwd": "/mnt/raid1_nvme/vcs-audio-5.0.0",
         "env": {"SERVER_PORT": "8080"},
         "protocol": "http",
         "path": "/app",
@@ -186,8 +243,9 @@ MODELS = {
         "name": "Higgs Audio Voice LLM",
         "description": "Voice-based LLM with Whisper speech recognition",
         "port": 8888,
-        "cmd": ["/mnt/raid1_sata/voice/bin/python3", "server.py"],
-        "cwd": "/mnt/raid1_sata/voice/higgs-audio",
+        "systemd_service": "voice-llm.service",
+        "cmd": ["/mnt/raid1_nvme/voice/bin/python3", "server.py"],
+        "cwd": "/mnt/raid1_nvme/voice/higgs-audio",
         "env": {},
         "protocol": "https",
         "category": "Audio",
@@ -246,7 +304,7 @@ MODELS = {
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.95",
                 "--max-model-len", "32768"],
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -264,7 +322,7 @@ MODELS = {
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.95",
                 "--max-model-len", "32768"],
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -282,7 +340,7 @@ MODELS = {
                 "--enable-auto-tool-choice", "--tool-call-parser", "llama3_json",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.95",
                 "--max-model-len", "32768"],
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -300,7 +358,7 @@ MODELS = {
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.95",
                 "--max-model-len", "65536"],
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -318,7 +376,7 @@ MODELS = {
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.95",
                 "--max-model-len", "32768"],
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -332,7 +390,7 @@ MODELS = {
         "description": "Chat UI + vLLM API (MoE, 3B active of 35B)",
         "port": 8007,
         "cmd": ["/mnt/raid1_sata/vllm-env/bin/python", "qwen35b_chat.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "LLM",
@@ -346,7 +404,7 @@ MODELS = {
         "description": "Chat UI with Transformers (uncensored MoE, 3B active of 30B)",
         "port": 8008,
         "cmd": ["/mnt/raid1_sata/vllm-env/bin/python", "qwen30b_abliterated_transformers.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "LLM",
@@ -364,7 +422,7 @@ MODELS = {
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.95",
                 "--max-model-len", "32768"],
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -379,7 +437,7 @@ MODELS = {
         "description": "Gradio chat UI for Qwen 3.6 35B-A3B — thinking mode toggle, streaming, tok/s stats",
         "port": 8014,
         "cmd": ["/mnt/raid1_sata/vllm-env/bin/python", "qwen36_35b_chat.py"],
-        "cwd": "/mnt/raid1_sata/JanusPro7b",
+        "cwd": "/mnt/raid1_nvme/JanusPro7b",
         "env": {},
         "protocol": "https",
         "category": "LLM",
@@ -392,13 +450,13 @@ MODELS = {
         "name": "Qwen 3.6 27B",
         "description": "vLLM OpenAI-compatible API (Qwen3.6 27B BF16, full precision — coding & chat)",
         "port": 8006,
-        "cmd": ["/mnt/raid1_sata/vllm-env/bin/vllm", "serve", "/mnt/raid1_sata/models/qwen36-27b",
+        "cmd": ["/mnt/raid1_sata/vllm-env/bin/vllm", "serve", "/mnt/raid1_nvme/models/qwen36-27b",
                 "--port", "8006", "--host", "0.0.0.0",
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.90",
                 "--max-model-len", "131072", "--trust-remote-code"],
         "env": {"PYTORCH_ALLOC_CONF": "expandable_segments:True"},
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "protocol": "http",
         "category": "LLM",
         "icon": "zap",
@@ -410,14 +468,14 @@ MODELS = {
         "name": "Qwen 3.6 35B-A3B",
         "description": "vLLM OpenAI-compatible API (Qwen3.6 MoE hybrid-attn, 3B active of 35B — coding & chat)",
         "port": 8012,
-        "cmd": ["/mnt/raid1_sata/vllm-env/bin/vllm", "serve", "/mnt/raid1_sata/models/qwen36-35b",
+        "cmd": ["/mnt/raid1_sata/vllm-env/bin/vllm", "serve", "/mnt/raid1_nvme/models/qwen36-35b",
                 "--port", "8012", "--host", "0.0.0.0",
                 "--enable-auto-tool-choice", "--tool-call-parser", "hermes",
                 "--tensor-parallel-size", "1", "--gpu-memory-utilization", "0.92",
                 "--max-model-len", "131072", "--trust-remote-code",
                 "--enforce-eager"],
         "env": {"PYTORCH_ALLOC_CONF": "expandable_segments:True"},
-        "cwd": "/mnt/raid1_sata/vllm-servers",
+        "cwd": "/mnt/raid1_nvme/vllm-servers",
         "protocol": "http",
         "category": "LLM",
         "icon": "terminal",
@@ -430,8 +488,8 @@ MODELS = {
         "description": "llama.cpp — 80B MoE (3B active), Q4_K_M, 131K ctx — agent/tool use",
         "port": 8085,
         "systemd_service": "qwen3-coder-next-q4.service",
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
-                "--model", "/mnt/raid1_sata/models/qwen3-coder-next/Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00001-of-00004.gguf",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen3-coder-next/Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00001-of-00004.gguf",
                 "--alias", "qwen3-coder-next",
                 "--ctx-size", "131072",
                 "-ngl", "99",
@@ -441,7 +499,7 @@ MODELS = {
                 "--jinja",
                 "--threads", "16",
                 "--reasoning-tokens", "none"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -455,8 +513,8 @@ MODELS = {
         "description": "llama.cpp — 80B MoE (3B active), 131K ctx, SWE-Bench 70.6 — best agent/tool use",
         "port": 8084,
         "systemd_service": "qwen3-coder-next.service",
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
-                "--model", "/mnt/raid1_sata/models/qwen3-coder-next/Qwen3-Coder-Next-Q6_K/Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen3-coder-next/Qwen3-Coder-Next-Q6_K/Qwen3-Coder-Next-Q6_K-00001-of-00004.gguf",
                 "--alias", "qwen3-coder-next",
                 "--ctx-size", "131072",
                 "-ngl", "99",
@@ -466,7 +524,7 @@ MODELS = {
                 "--jinja",
                 "--threads", "16",
                 "--reasoning-tokens", "none"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -479,18 +537,21 @@ MODELS = {
         "name": "Qwen3.6 35B Uncensored (Q8)",
         "description": "llama.cpp — Q8_K_P, 43GB, Qwen3.6 35B-A3B uncensored, 256K context",
         "port": 8086,
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
-                "--model", "/mnt/raid1_sata/models/qwen36-35b-uncensored/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
+        "systemd_service": "qwen36-35b-uncensored.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/models/qwen36-35b-uncensored/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
                 "--alias", "qwen36-35b-uncensored",
                 "--ctx-size", "262144",
                 "-ngl", "99",
                 "-b", "2048", "-ub", "2048",
+                "--cache-ram", "0",
                 "--host", "0.0.0.0",
                 "--port", "8086",
                 "--jinja",
                 "--chat-template-kwargs", '{"enable_thinking":false}',
-                "--threads", "16"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
+                "--threads", "16",
+                "--chunk", "4096"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -499,13 +560,228 @@ MODELS = {
         "tags": ["text-to-text", "text-to-code", "agents"],
         "supports_offload": False,
     },
+    "qwen36_35b_uncensored_512k": {
+        "name": "Qwen3.6 35B Uncensored (Q8, 512K ctx)",
+        "description": "llama.cpp — Q8_K_P, 43GB, Qwen3.6 35B-A3B uncensored, YaRN-extended to 512K context",
+        "port": 8097,
+        "systemd_service": "qwen36-35b-uncensored-512k.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen36-35b-uncensored/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
+                "--alias", "qwen36-35b-uncensored-512k",
+                "--ctx-size", "524288",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--cache-ram", "0",
+                "--host", "0.0.0.0",
+                "--port", "8097",
+                "--jinja",
+                "--chat-template-kwargs", '{"enable_thinking":false}',
+                "--threads", "16",
+                "--chunk", "4096"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "zap",
+        "color": "#f97316",
+        "tags": ["text-to-text", "text-to-code", "agents"],
+        "supports_offload": False,
+    },
+    "qwen36_35b_uncensored_1m": {
+        "name": "Qwen3.6 35B Uncensored (Q8, 1M ctx)",
+        "description": "llama.cpp — Q8_K_P, 43GB, Qwen3.6 35B-A3B uncensored, YaRN-extended to 1M context, Q8_0 KV cache (~84GB VRAM total)",
+        "port": 8098,
+        "systemd_service": "qwen36-35b-uncensored-1m.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen36-35b-uncensored/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
+                "--alias", "qwen36-35b-uncensored-1m",
+                "--ctx-size", "1048576",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ctk", "q8_0", "-ctv", "q8_0",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--cache-ram", "0",
+                "--host", "0.0.0.0",
+                "--port", "8098",
+                "--jinja",
+                "--chat-template-kwargs", '{"enable_thinking":false}',
+                "--threads", "16",
+                "--chunk", "4096"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "zap",
+        "color": "#f97316",
+        "tags": ["text-to-text", "text-to-code", "agents"],
+        "supports_offload": False,
+    },
+    "qwen36_40b_q6": {
+        "name": "Qwen3.6-40B Claude 4.6 Opus (Q6_K)",
+        "description": "llama.cpp — Q6_K, 25GB, DavidAU Claude-4.6-Opus Deckard Heretic NEo CODE Di IMatrix MAX, 256K ctx",
+        "port": 9000,
+        "systemd_service": "qwen36-40b-q6.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/davidau-qwen3.6-40b/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-Q6_K.gguf",
+                "--alias", "qwen36-40b-q6",
+                "--ctx-size", "262144",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "8087",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain",
+        "color": "#818cf8",
+        "tags": ["text-to-text", "text-to-code", "agents", "claude"],
+        "supports_offload": False,
+    },
+    "qwen36_40b_q8": {
+        "name": "Qwen3.6-40B Claude 4.6 Opus (HIGH-Q8_0)",
+        "description": "llama.cpp — HIGH-Q8_0, 38GB, DavidAU Claude-4.6-Opus Deckard Heretic NEo CODE Di IMatrix MAX, 256K ctx",
+        "port": 9001,
+        "systemd_service": "qwen36-40b-q8.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/davidau-qwen3.6-40b/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-HIGH-Q8_0.gguf",
+                "--alias", "qwen36-40b-q8",
+                "--ctx-size", "262144",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "8088",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#a855f7",
+        "tags": ["text-to-text", "text-to-code", "agents", "claude", "high-precision"],
+        "supports_offload": False,
+    },
+    "qwen36_40b_q8_384k": {
+        "name": "Qwen3.6-40B Claude 4.6 Opus (HIGH-Q8_0, 384K ctx)",
+        "description": "llama.cpp — HIGH-Q8_0, 38GB, DavidAU Claude-4.6-Opus Deckard Heretic NEo CODE Di IMatrix MAX, YaRN-extended to 384K ctx, Q4_0 KV cache (~81GB VRAM total)",
+        "port": 9002,
+        "systemd_service": "qwen36-40b-q8-384k.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/davidau-qwen3.6-40b/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-HIGH-Q8_0.gguf",
+                "--alias", "qwen36-40b-q8-384k",
+                "--ctx-size", "393216",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ctk", "q4_0", "-ctv", "q4_0",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9002",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#a855f7",
+        "tags": ["text-to-text", "text-to-code", "agents", "claude", "high-precision"],
+        "supports_offload": False,
+    },
+    "qwen36_40b_q8_1m": {
+        "name": "Qwen3.6-40B Claude 4.6 Opus (HIGH-Q8_0, 1M ctx)",
+        "description": "llama.cpp — HIGH-Q8_0, 38GB, DavidAU Claude-4.6-Opus Deckard Heretic NEo CODE Di IMatrix MAX, YaRN-extended to 1M ctx, Q8_0 KV cache — needs the GPU to itself, will OOM if another large model is loaded",
+        "port": 9004,
+        "systemd_service": "qwen36-40b-q8-1m.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/davidau-qwen3.6-40b/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-HIGH-Q8_0.gguf",
+                "--alias", "qwen36-40b-q8-1m",
+                "--ctx-size", "1048576",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ctk", "q8_0", "-ctv", "q8_0",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9004",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#a855f7",
+        "tags": ["text-to-text", "text-to-code", "agents", "claude", "high-precision"],
+        "supports_offload": False,
+    },
+    "qwen36_40b_q8_512k": {
+        "name": "Qwen3.6-40B Claude 4.6 Opus (HIGH-Q8_0, 512K ctx)",
+        "description": "llama.cpp — HIGH-Q8_0, 38GB, DavidAU Claude-4.6-Opus Deckard Heretic NEo CODE Di IMatrix MAX, YaRN-extended to 512K ctx, Q8_0 KV cache — needs the GPU to itself, will OOM if another large model is loaded",
+        "port": 9005,
+        "systemd_service": "qwen36-40b-q8-512k.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/davidau-qwen3.6-40b/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-HIGH-Q8_0.gguf",
+                "--alias", "qwen36-40b-q8-512k",
+                "--ctx-size", "524288",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ctk", "q8_0", "-ctv", "q8_0",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9005",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#a855f7",
+        "tags": ["text-to-text", "text-to-code", "agents", "claude", "high-precision"],
+        "supports_offload": False,
+    },
+    "qwen36_40b_q6_512k": {
+        "name": "Qwen3.6-40B Claude 4.6 Opus (Q6_K, 512K ctx)",
+        "description": "llama.cpp — Q6_K, 25GB, DavidAU Claude-4.6-Opus Deckard Heretic NEo CODE Di IMatrix MAX, YaRN-extended to 512K ctx, Q4_0 KV cache (~83GB VRAM total)",
+        "port": 9003,
+        "systemd_service": "qwen36-40b-q6-512k.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/davidau-qwen3.6-40b/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-Q6_K.gguf",
+                "--alias", "qwen36-40b-q6-512k",
+                "--ctx-size", "524288",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ctk", "q4_0", "-ctv", "q4_0",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9003",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain",
+        "color": "#818cf8",
+        "tags": ["text-to-text", "text-to-code", "agents", "claude"],
+        "supports_offload": False,
+    },
     "qwen35_122b_q5": {
         "name": "Qwen3.5 122B Q5 (single)",
         "description": "llama.cpp — Q5_K_M, 88GB, max quality, single session",
         "port": 8082,
         "systemd_service": "qwen35-122b.service",
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
-                "--model", "/mnt/raid1_sata/models/qwen35-122b/Qwen_Qwen3.5-122B-A10B-Q5_K_M/Qwen_Qwen3.5-122B-A10B-Q5_K_M-00001-of-00003.gguf",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/models/qwen35-122b/Qwen_Qwen3.5-122B-A10B-Q5_K_M/Qwen_Qwen3.5-122B-A10B-Q5_K_M-00001-of-00003.gguf",
                 "--alias", "qwen35-122b",
                 "--ctx-size", "262144",
                 "-ngl", "99",
@@ -514,7 +790,7 @@ MODELS = {
                 "--port", "8082",
                 "--jinja",
                 "--threads", "16"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -528,8 +804,8 @@ MODELS = {
         "description": "llama.cpp — Q4_K_M, 75GB, 4 parallel agents, 256K ctx each",
         "port": 8083,
         "systemd_service": "qwen35-122b-q4.service",
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
-                "--model", "/mnt/raid1_sata/models/qwen35-122b/Qwen_Qwen3.5-122B-A10B-Q4_K_M/Qwen_Qwen3.5-122B-A10B-Q4_K_M-00001-of-00002.gguf",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen35-122b/Qwen_Qwen3.5-122B-A10B-Q4_K_M/Qwen_Qwen3.5-122B-A10B-Q4_K_M-00001-of-00002.gguf",
                 "--alias", "qwen35-122b",
                 "--ctx-size", "262144",
                 "--parallel", "4",
@@ -539,7 +815,7 @@ MODELS = {
                 "--port", "8083",
                 "--jinja",
                 "--threads", "16"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -552,8 +828,8 @@ MODELS = {
         "name": "MiniMax M2.5",
         "description": "llama.cpp OpenAI-compatible API (230B MoE, 10B active, coding/agents)",
         "port": 8081,
-        "cmd": ["/mnt/raid1_sata/models/ik_llama.cpp/build/bin/llama-server",
-                "--model", "/mnt/raid1_sata/models/minimax-m2.5/smol-IQ3_KS/MiniMax-M2.5-smol-IQ3_KS-00001-of-00003.gguf",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/minimax-m2.5/smol-IQ3_KS/MiniMax-M2.5-smol-IQ3_KS-00001-of-00003.gguf",
                 "--alias", "minimax-m2.5",
                 "--ctx-size", "65536",
                 "-ngl", "99",
@@ -562,7 +838,7 @@ MODELS = {
                 "--port", "8081",
                 "--jinja",
                 "--threads", "16"],
-        "cwd": "/mnt/raid1_sata/models/ik_llama.cpp",
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
         "env": {},
         "protocol": "http",
         "category": "LLM",
@@ -598,6 +874,206 @@ MODELS = {
         "color": "#60a5fa",
         "tags": ["text-to-text"],
     },
+    "unlimited_ocr": {
+        "name": "Unlimited-OCR",
+        "description": "One-shot long-horizon document parsing (Baidu/SGLang)",
+        "port": 10000,
+        "cmd": ["/mnt/raid1_nvme/JanusPro7b/Unlimited-OCR/unlimited-ocr-venv/bin/python", "infer.py"],
+        "cwd": "/mnt/raid1_nvme/JanusPro7b/Unlimited-OCR",
+        "env": {},
+        "protocol": "http",
+        "category": "Tools",
+        "icon": "scan-line",
+        "color": "#06b6d4",
+        "tags": ["ocr", "document-parsing", "image-to-text"],
+        "supports_offload": False,
+        "vram_gb": 24,
+    },
+    "gemma_4_31b": {
+        "name": "Gemma 4 31B IT",
+        "description": "Google Gemma 4 31B Instruct - Advanced reasoning & generation",
+        "port": 8091,
+        "cmd": ["/mnt/raid1_nvme/models/gemma-4-31b-it/venv/bin/python", "-m", "transformers"],
+        "cwd": "/mnt/raid1_nvme/models/gemma-4-31b-it",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain",
+        "color": "#8b5cf6",
+        "tags": ["llm", "instruct", "reasoning"],
+        "supports_offload": True,
+        "vram_gb": 66,
+    },
+    "qwen36_27b_nvfp4": {
+        "name": "Qwen3.6 27B NVFP4",
+        "description": "Unsloth Qwen3.6 27B NVFP4 quantized - Fast vLLM inference",
+        "port": 8088,
+        "cmd": ["/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4/venv/bin/python", "-m", "vllm.entrypoints.api_server", "--model", "unsloth/Qwen3.6-27B-NVFP4", "--port", "8088"],
+        "cwd": "/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "cpu",
+        "color": "#06b6d4",
+        "tags": ["llm", "quantized", "fast"],
+        "supports_offload": True,
+        "vram_gb": 20,
+    },
+    "ornith_35b_q8": {
+        "name": "Ornith 1.0 35B Q8_0",
+        "description": "Ornith 1.0 35B 8-bit GGUF - High quality quantized",
+        "port": 8092,
+        "cmd": ["/mnt/raid1_nvme/models/Ornith-1.0-35B/venv/bin/python", "-m", "llama_cpp.server", "--model", "/mnt/raid1_nvme/models/Ornith-1.0-35B/models/ornith-1.0-35b-Q8_0.gguf", "--port", "8092"],
+        "cwd": "/mnt/raid1_nvme/models/Ornith-1.0-35B",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain",
+        "color": "#f59e0b",
+        "tags": ["llm", "gguf", "quantized"],
+        "supports_offload": True,
+        "vram_gb": 38,
+    },
+    "ornith_35b_bf16": {
+        "name": "Ornith 1.0 35B BF16",
+        "description": "Ornith 1.0 35B 16-bit bfloat16 - Full precision",
+        "port": 8090,
+        "cmd": ["/mnt/raid1_nvme/models/Ornith-1.0-35B/venv/bin/python", "-m", "llama_cpp.server", "--model", "/mnt/raid1_nvme/models/Ornith-1.0-35B/models/ornith-1.0-35b-bf16.gguf", "--port", "8090"],
+        "cwd": "/mnt/raid1_nvme/models/Ornith-1.0-35B",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "cpu",
+        "color": "#ef4444",
+        "tags": ["llm", "gguf", "full-precision"],
+        "supports_offload": True,
+        "vram_gb": 72,
+    },
+    "laguna_s21_q4": {
+        "name": "Laguna S-2.1 Q4_K_M",
+        "description": "Poolside Laguna S-2.1 Q4 - 1M context, 32B parameter model",
+        "port": 8095,
+        "cmd": ["/mnt/raid1_nvme/models/poolside-s21-venv/bin/python", "-m", "llama_cpp.server", "--model", "/mnt/raid1_nvme/models/Laguna-S-2.1/models/laguna-s-2.1-Q4_K_M.gguf", "--port", "8095"],
+        "cwd": "/mnt/raid1_nvme/models/Laguna-S-2.1",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain",
+        "color": "#7c3aed",
+        "tags": ["llm", "gguf", "1m-context"],
+        "supports_offload": True,
+        "vram_gb": 96,
+    },
+    "laguna_s21_q8": {
+        "name": "Laguna S-2.1 Q8_0",
+        "description": "Poolside Laguna S-2.1 Q8 - 1M context, 32B parameter model (high quality)",
+        "port": 8096,
+        "cmd": ["/mnt/raid1_nvme/models/poolside-s21-venv/bin/python", "-m", "llama_cpp.server", "--model", "/mnt/raid1_nvme/models/Laguna-S-2.1/models/laguna-s-2.1-Q8_0.gguf", "--port", "8096"],
+        "cwd": "/mnt/raid1_nvme/models/Laguna-S-2.1",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#4f46e5",
+        "tags": ["llm", "gguf", "1m-context", "high-quality"],
+        "supports_offload": True,
+        "vram_gb": 96,
+    },
+    "minimax_h3": {
+        "name": "MiniMax H3",
+        "description": "33B omni-modal image-text-to-video generation with native stereo audio (BF16, vLLM)",
+        "port": 30010,
+        "systemd_service": "minimax-h3.service",
+        "cmd": ["/usr/local/bin/vllm", "serve", "MiniMaxAI/MiniMax-H3", "--port", "30010", "--model-variant", "fl2va", "--dtype", "bfloat16", "--cpu-offload-gb", "16"],
+        "cwd": "/mnt/raid1_nvme/models/MiniMax-H3",
+        "env": {},
+        "protocol": "http",
+        "category": "Video",
+        "icon": "film",
+        "color": "#f97316",
+        "tags": ["image-text-to-video", "text-to-video", "audio-video", "33b"],
+        "supports_offload": True,
+        "vram_gb": 96,
+    },
+ 
+    "qwen36_27b_fable": {
+        "name": "Qwen3.6-27B Fable Fusion 711 (Q8_0 MTP)",
+        "description": "llama.cpp — Q8_0 MTP, 30GB, DavidAU Heretic Uncensored, NEO MAX Imatrix, vision-enabled",
+        "port": 9006,
+        "systemd_service": "qwen36-27b-fable.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen36-27b-fable-fusion/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q8_0.gguf",
+                "--alias", "qwen36-27b-fable",
+                "--ctx-size", "262144",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9006",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#a855f7",
+        "tags": ["text-to-text", "vision", "q8_0", "mtp", "heretic"],
+        "supports_offload": False,
+        "vram_gb": 32,
+    },
+    "qwen36_27b_fable_1m": {
+        "name": "Qwen3.6-27B Fable Fusion 711 (Q8_0 MTP, 1M ctx)",
+        "description": "llama.cpp — Q8_0 MTP, 30GB, DavidAU Heretic Uncensored, YaRN-extended to 1M ctx, Q8_0 KV cache",
+        "port": 9007,
+        "systemd_service": "qwen36-27b-fable-1m.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen36-27b-fable-fusion/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q8_0.gguf",
+                "--alias", "qwen36-27b-fable-1m",
+                "--ctx-size", "1048576",
+                "--rope-scaling", "yarn",
+                "--yarn-orig-ctx", "262144",
+                "-ctk", "q8_0", "-ctv", "q8_0",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9007",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "brain-circuit",
+        "color": "#a855f7",
+        "tags": ["text-to-text", "vision", "q8_0", "mtp", "heretic", "1m-context"],
+        "supports_offload": False,
+        "vram_gb": 96,
+      },
+    "qwen36_27b_fable_amd": {
+        "name": "Qwen3.6-27B Fable Fusion 711 (AMD IQ4_XS MTP)",
+        "description": "llama.cpp — AMD-optimized IQ4_XS MTP, 16GB, DavidAU Heretic Uncensored, NEO MAX Imatrix, vision-enabled",
+        "port": 9008,
+        "systemd_service": "qwen36-27b-fable-amd.service",
+        "cmd": ["/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/models/qwen36-27b-fable-amd/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-AMD-MTP-IQ4_XS.gguf",
+                "--alias", "qwen36-27b-fable-amd",
+                "--ctx-size", "262144",
+                "-ngl", "99",
+                "-b", "2048", "-ub", "2048",
+                "--host", "0.0.0.0",
+                "--port", "9008",
+                "--jinja",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/models/ik_llama.cpp",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "cpu",
+        "color": "#f97316",
+        "tags": ["text-to-text", "vision", "iq4_xs", "mtp", "heretic", "amd-optimized"],
+        "supports_offload": False,
+        "vram_gb": 18,
+    },
 }
 
 # Group ordering for display
@@ -611,7 +1087,7 @@ app = FastAPI()
 # ── Power tracking ────────────────────────────────────────────────
 import threading, json as _json_mod, datetime as _dt_mod
 
-POWER_LOG = "/mnt/raid1_sata/JanusPro7b/logs/power_usage.json"
+POWER_LOG = "/mnt/raid1_nvme/JanusPro7b/logs/power_usage.json"
 
 def _load_power_log() -> dict:
     try:
@@ -761,8 +1237,14 @@ def api_gpu():
 
 @app.get("/api/status")
 def api_status():
+    try:
+        token_stats = _load_token_stats()
+        by_model = token_stats.get("by_model", {})
+    except Exception:
+        by_model = {}
     result = {}
     for model_id, model in MODELS.items():
+        usage = by_model.get(model_id, {}).get("total", 0)
         result[model_id] = {
             "name": model["name"],
             "description": model["description"],
@@ -774,6 +1256,7 @@ def api_status():
             "tags": model.get("tags", []),
             "path": model.get("path", ""),
             "supports_offload": model.get("supports_offload", False),
+            "token_usage": usage,
             **get_model_status(model_id),
         }
     return JSONResponse(result)
@@ -836,7 +1319,7 @@ def api_start(model_id: str, offload: bool = False):
             # Gradio/other apps: set env var for the app to check
             env["CPU_OFFLOAD"] = "1"
 
-    log_path = f"/mnt/raid1_sata/JanusPro7b/logs/{model_id}.log"
+    log_path = f"/mnt/raid1_nvme/JanusPro7b/logs/{model_id}.log"
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
     # Close previous log file handle if any
@@ -921,7 +1404,7 @@ def api_stop(model_id: str):
 def api_logs(model_id: str):
     if model_id not in MODELS:
         return JSONResponse({"error": "Unknown model"}, status_code=404)
-    log_path = f"/mnt/raid1_sata/JanusPro7b/logs/{model_id}.log"
+    log_path = f"/mnt/raid1_nvme/JanusPro7b/logs/{model_id}.log"
     try:
         with open(log_path) as f:
             lines = f.readlines()
@@ -1333,6 +1816,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">All</button>
 </div>
 
+<div class="filter-bar" id="sort-bar">
+  <span class="filter-label">Sort</span>
+  <button class="filter-chip active" data-sort="usage" onclick="setSort('usage')">Most Used</button>
+  <button class="filter-chip" data-sort="name" onclick="setSort('name')">Name A–Z</button>
+  <button class="filter-chip" data-sort="status" onclick="setSort('status')">Status</button>
+</div>
+
 <div id="content"></div>
 
 <div class="footer">Load &middot; Use &middot; Unload</div>
@@ -1343,7 +1833,16 @@ const HOST = location.hostname;
 const CATEGORY_ORDER = ['Image', 'Video', 'Audio', 'LLM', 'Tools'];
 let currentModels = {};
 let activeFilter = 'all';
+let activeSort = 'usage';
 let filtersBuilt = false;
+
+function setSort(sort) {
+  activeSort = sort;
+  document.querySelectorAll('#sort-bar .filter-chip').forEach(b => {
+    b.classList.toggle('active', b.dataset.sort === sort);
+  });
+  renderAll(currentModels);
+}
 
 function buildFilters(models) {
   if (filtersBuilt) return;
@@ -1417,9 +1916,22 @@ function renderAll(models) {
     if (m.status !== 'stopped') runCount++;
   }
 
+  // Sort within each category
+  for (const cat in groups) {
+    const list = groups[cat];
+    if (activeSort === 'usage') {
+      list.sort((a, b) => (b[1].token_usage || 0) - (a[1].token_usage || 0));
+    } else if (activeSort === 'name') {
+      list.sort((a, b) => a[1].name.localeCompare(b[1].name));
+    } else if (activeSort === 'status') {
+      const order = { starting: 0, ready: 1, stopped: 2 };
+      list.sort((a, b) => (order[a[1].status] ?? 3) - (order[b[1].status] ?? 3));
+    }
+  }
+
   document.getElementById('running-count').textContent = runCount + ' model' + (runCount !== 1 ? 's' : '') + ' running';
 
-  // Build HTML if first render
+  // Build/rebuild HTML
   if (!content.dataset.rendered) {
     let html = '';
     for (const cat of CATEGORY_ORDER) {
@@ -1427,6 +1939,7 @@ function renderAll(models) {
       html += `<div class="category-label" id="label-${cat}">${cat}</div><div class="grid" id="grid-${cat}">`;
       for (const [id, m] of groups[cat]) {
         const tagBadges = (m.tags || []).map(t => `<span class="tag-badge">${t}</span>`).join('');
+        const vramBadge = m.vram_gb ? `<span class="vram-badge"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6" y2="8"></line><line x1="6" y1="18" x2="6" y2="20"></line><line x1="18" y1="6" x2="18" y2="8"></line><line x1="18" y1="18" x2="18" y2="20"></line><line x1="6" y1="12" x2="18" y2="12"></line></svg> ${m.vram_gb}GB</span>` : '';
         html += `
         <div class="card" id="card-${id}" data-tags="${(m.tags||[]).join(',')}">
           <div class="card-top">
@@ -1435,6 +1948,7 @@ function renderAll(models) {
               <div class="desc">${m.description}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
                 <span class="port-badge">:${m.port}</span>
+                ${vramBadge}
                 ${tagBadges}
               </div>
             </div>
@@ -1454,6 +1968,17 @@ function renderAll(models) {
     }
     content.innerHTML = html;
     content.dataset.rendered = '1';
+  } else {
+    // Reorder existing cards within each grid (without full rebuild)
+    for (const cat of CATEGORY_ORDER) {
+      if (!groups[cat]) continue;
+      const grid = document.getElementById('grid-' + cat);
+      if (!grid) continue;
+      for (const [id] of groups[cat]) {
+        const card = document.getElementById('card-' + id);
+        if (card) grid.appendChild(card);
+      }
+    }
   }
 
   // Update statuses
