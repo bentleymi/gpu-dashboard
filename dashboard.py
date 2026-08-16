@@ -3,6 +3,7 @@ import signal
 import socket
 import os
 import re
+import threading
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
@@ -1149,6 +1150,7 @@ CATEGORY_ORDER = ["Image", "Video", "Audio", "LLM", "Tools"]
 
 processes: dict[str, subprocess.Popen] = {}
 log_files: dict[str, object] = {}
+op_lock = threading.Lock()
 
 app = FastAPI()
 
@@ -1382,86 +1384,58 @@ def api_status():
     return JSONResponse(result)
 
 
-def stop_other_llm_models(exclude_model_id: str):
-    """Stop all running LLM and Video models except the one being started."""
-    for mid, m in MODELS.items():
-        if mid == exclude_model_id or m["category"] not in ("LLM", "Video"):
-            continue
-        proc = processes.get(mid)
-        if proc and proc.poll() is None:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                proc.wait()
-            except Exception:
-                pass
-            processes.pop(mid, None)
-            if mid in log_files:
-                try:
-                    log_files[mid].close()
-                except Exception:
-                    pass
-                log_files.pop(mid, None)
-        # Also kill anything on the port
-        port = m["port"]
-        if is_port_open(port):
-            kill_port(port)
-
-
 @app.post("/api/start/{model_id}")
 def api_start(model_id: str, offload: bool = False):
     if model_id not in MODELS:
         return JSONResponse({"error": "Unknown model"}, status_code=404)
 
-    status = get_model_status(model_id)
-    if status["status"] != "stopped":
-        return JSONResponse({"message": "Already running", **status})
+    with op_lock:
+        status = get_model_status(model_id)
+        if status["status"] != "stopped":
+            return JSONResponse({"message": "Already running", **status})
 
-    model = MODELS[model_id]
+        model = MODELS[model_id]
 
-    # Auto-stop other LLM/Video models to free GPU memory
-    if model["category"] in ("LLM", "Video"):
-        stop_other_llm_models(model_id)
+        # If managed by systemd, delegate start to systemctl
+        systemd_service = model.get("systemd_service")
+        if systemd_service:
+            subprocess.run(["systemctl", "start", systemd_service], capture_output=True)
+            return JSONResponse({"message": "Starting via systemd"})
 
-    # If managed by systemd, delegate start to systemctl
-    systemd_service = model.get("systemd_service")
-    if systemd_service:
-        subprocess.run(["systemctl", "start", systemd_service], capture_output=True)
-        return JSONResponse({"message": "Starting via systemd"})
+        env = {**os.environ, **model["env"]}
+        cmd = list(model["cmd"])
 
-    env = {**os.environ, **model["env"]}
-    cmd = list(model["cmd"])
+        if offload and model.get("supports_offload"):
+            # vLLM models: add --cpu-offload-gb flag
+            if cmd[0].endswith("vllm"):
+                cmd.extend(["--cpu-offload-gb", "24"])
+            else:
+                # Gradio/other apps: set env var for the app to check
+                env["CPU_OFFLOAD"] = "1"
 
-    if offload and model.get("supports_offload"):
-        # vLLM models: add --cpu-offload-gb flag
-        if cmd[0].endswith("vllm"):
-            cmd.extend(["--cpu-offload-gb", "24"])
-        else:
-            # Gradio/other apps: set env var for the app to check
-            env["CPU_OFFLOAD"] = "1"
+        log_path = f"/mnt/raid1_nvme/JanusPro7b/logs/{model_id}.log"
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    log_path = f"/mnt/raid1_nvme/JanusPro7b/logs/{model_id}.log"
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        # Close previous log file handle if any
+        if model_id in log_files:
+            try:
+                log_files[model_id].close()
+            except Exception:
+                pass
 
-    # Close previous log file handle if any
-    if model_id in log_files:
-        try:
-            log_files[model_id].close()
-        except Exception:
-            pass
+        lf = open(log_path, "w")
+        log_files[model_id] = lf
 
-    lf = open(log_path, "w")
-    log_files[model_id] = lf
-
-    proc = subprocess.Popen(
-        cmd,
-        cwd=model["cwd"],
-        env=env,
-        stdout=lf,
-        stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid,
-    )
-    processes[model_id] = proc
-    return JSONResponse({"message": "Starting", "pid": proc.pid})
+        proc = subprocess.Popen(
+            cmd,
+            cwd=model["cwd"],
+            env=env,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            preexec_fn=os.setsid,
+        )
+        processes[model_id] = proc
+        return JSONResponse({"message": "Starting", "pid": proc.pid})
 
 
 def kill_port(port: int):
@@ -1485,36 +1459,37 @@ def api_stop(model_id: str):
     if model_id not in MODELS:
         return JSONResponse({"error": "Unknown model"}, status_code=404)
 
-    model = MODELS[model_id]
+    with op_lock:
+        model = MODELS[model_id]
 
-    # If managed by systemd, stop the service so it doesn't restart
-    systemd_service = model.get("systemd_service")
-    if systemd_service:
-        subprocess.run(["systemctl", "stop", systemd_service], capture_output=True)
+        # If managed by systemd, stop the service so it doesn't restart
+        systemd_service = model.get("systemd_service")
+        if systemd_service:
+            subprocess.run(["systemctl", "stop", systemd_service], capture_output=True)
 
-    proc = processes.get(model_id)
-    if proc and proc.poll() is None:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            proc.wait()
-        except Exception:
-            pass
-        processes.pop(model_id, None)
-        if model_id in log_files:
+        proc = processes.get(model_id)
+        if proc and proc.poll() is None:
             try:
-                log_files[model_id].close()
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait()
             except Exception:
                 pass
-            log_files.pop(model_id, None)
-        return JSONResponse({"message": "Stopped"})
+            processes.pop(model_id, None)
+            if model_id in log_files:
+                try:
+                    log_files[model_id].close()
+                except Exception:
+                    pass
+                log_files.pop(model_id, None)
+            return JSONResponse({"message": "Stopped"})
 
-    # Not managed by us — kill whatever is on the port
-    processes.pop(model_id, None)
-    port = model["port"]
-    if is_port_open(port):
-        kill_port(port)
-        return JSONResponse({"message": "Stopped"})
-    return JSONResponse({"message": "Already stopped"})
+        # Not managed by us — kill whatever is on the port
+        processes.pop(model_id, None)
+        port = model["port"]
+        if is_port_open(port):
+            kill_port(port)
+            return JSONResponse({"message": "Stopped"})
+        return JSONResponse({"message": "Already stopped"})
 
 
 @app.get("/api/logs/{model_id}")
