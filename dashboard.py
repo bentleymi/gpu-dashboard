@@ -2013,8 +2013,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
 const HOST = location.hostname;
 const tbody = document.getElementById('model-tbody');
 let currentModels = {};
-let sortKey = 'name';
-let sortDir = 1;
+let sortKey = 'fav';
+let sortDir = -1;
 let searchQuery = '';
 let rowMap = {};
 let logIntervals = {};
@@ -2030,6 +2030,7 @@ function toggleFav(id) {
   saveFavs();
   const star = document.getElementById('star-' + id);
   if (star) star.classList.toggle('on', favorites.has(id));
+  if (sortKey === 'fav') renderAll(currentModels);
 }
 
 function sortValue(id, m, key) {
@@ -2055,7 +2056,7 @@ function sortRows() {
     const va = sortValue(a, currentModels[a], sortKey);
     const vb = sortValue(b, currentModels[b], sortKey);
     let r = va < vb ? -1 : (va > vb ? 1 : 0);
-    if (r === 0) r = currentModels[a].name.localeCompare(currentModels[b].name);
+    if (r === 0) return currentModels[a].name.localeCompare(currentModels[b].name);
     return r * sortDir;
   });
   return ids;
@@ -2082,6 +2083,8 @@ document.getElementById('search').addEventListener('input', e => {
   searchQuery = e.target.value.trim();
   renderAll(currentModels);
 });
+
+document.querySelector('#model-table th[data-key="fav"]').classList.add('sorted-desc');
 
 function buildRow(id, m) {
   const tr = document.createElement('tr');
