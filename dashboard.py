@@ -2,6 +2,7 @@ import subprocess
 import signal
 import socket
 import os
+import re
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
@@ -227,11 +228,11 @@ MODELS = {
     "rvc": {
         "name": "RVC Audio",
         "description": "Real-time voice conversion & TTS API",
-        "port": 8080,
+        "port": 8093,
         "systemd_service": "rvc-audio.service",
         "cmd": ["/mnt/raid1_nvme/vcs-audio-5.0.0/venv/bin/python", "-m", "src.api.main"],
         "cwd": "/mnt/raid1_nvme/vcs-audio-5.0.0",
-        "env": {"SERVER_PORT": "8080"},
+        "env": {"SERVER_PORT": "8093"},
         "protocol": "http",
         "path": "/app",
         "category": "Audio",
@@ -919,6 +920,21 @@ MODELS = {
         "supports_offload": True,
         "vram_gb": 20,
     },
+    "qwen38_27b_nvfp4": {
+        "name": "Qwen3.8 27B NVFP4",
+        "description": "Unsloth Qwen3.8 27B NVFP4 quantized - Fast vLLM inference",
+        "port": 8094,
+        "cmd": ["/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4/venv/bin/python", "-m", "vllm.entrypoints.api_server", "--model", "unsloth/Qwen3.8-27B-NVFP4", "--port", "8094"],
+        "cwd": "/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4",
+        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "cpu",
+        "color": "#0ea5e9",
+        "tags": ["llm", "quantized", "fast"],
+        "supports_offload": True,
+        "vram_gb": 20,
+    },
     "ornith_35b_q8": {
         "name": "Ornith 1.0 35B Q8_0",
         "description": "Ornith 1.0 35B 8-bit GGUF - High quality quantized",
@@ -1074,6 +1090,58 @@ MODELS = {
         "supports_offload": False,
         "vram_gb": 18,
     },
+    "vllm_qwen38_27b": {
+        "name": "Qwen3.8 27B",
+        "description": "vLLM OpenAI-compatible API (Qwen3.8 27B, Qwen3.5 hybrid-attn arch, 256K context — coding & chat)",
+        "port": 8010,
+        "systemd_service": "qwen38-27b.service",
+        "cmd": ["/mnt/raid1_nvme/Qwen3_8-27B/venv/bin/python", "-m", "vllm.entrypoints.openai.api_server",
+                "--model", "/mnt/raid1_nvme/Qwen3_8-27B/fp16",
+                "--served-model-name", "qwen38-27b", "qwen38-27b-fp16",
+                "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder",
+                "--chat-template", "/mnt/raid1_nvme/Qwen3_8-27B/chat_template_patched.jinja",
+                "--dtype", "half",
+                "--port", "8010", "--host", "0.0.0.0",
+                "--gpu-memory-utilization", "0.90",
+                "--max-model-len", "262144",
+                "--max-num-seqs", "256",
+                "--default-chat-template-kwargs", '{"reasoning_effort": "medium"}'],
+        "cwd": "/mnt/raid1_nvme/Qwen3_8-27B",
+        "env": {"PYTORCH_ALLOC_CONF": "expandable_segments:True"},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "sparkles",
+        "color": "#f97316",
+        "tags": ["text-to-text", "text-to-code"],
+        "supports_offload": True,
+        "vram_gb": 80,
+    },
+    "vllm_qwen38_27b_q8": {
+        "name": "Qwen3.8 27B (Q8_K_XL)",
+        "description": "llama.cpp — unsloth Q8_K_XL GGUF, ~30GB, 256K ctx — coding & chat",
+        "port": 8011,
+        "systemd_service": "qwen38-27b-q8.service",
+        "cmd": ["/mnt/raid1_nvme/Qwen3_8-27B/llama.cpp/build/bin/llama-server",
+                "--model", "/mnt/raid1_nvme/Qwen3_8-27B/gguf-q8/Qwen3.8-27B-UD-Q8_K_XL.gguf",
+                "--alias", "qwen38-27b-q8",
+                "--host", "0.0.0.0",
+                "--port", "8011",
+                "--ctx-size", "262144",
+                "--parallel", "1",
+                "-ngl", "99",
+                "--jinja",
+                "--reasoning-effort", "medium",
+                "--threads", "16"],
+        "cwd": "/mnt/raid1_nvme/Qwen3_8-27B",
+        "env": {},
+        "protocol": "http",
+        "category": "LLM",
+        "icon": "sparkles",
+        "color": "#f97316",
+        "tags": ["text-to-text", "text-to-code"],
+        "supports_offload": False,
+        "vram_gb": 46,
+    },
 }
 
 # Group ordering for display
@@ -1139,11 +1207,21 @@ def get_model_status(model_id: str) -> dict:
     port_up = is_port_open(model["port"])
     if managed:
         return {"status": "ready" if port_up else "starting", "pid": proc.pid, "managed": True}
-    else:
-        processes.pop(model_id, None)
-        if port_up:
-            return {"status": "ready", "pid": None, "managed": False}
+
+    processes.pop(model_id, None)
+    systemd_service = model.get("systemd_service")
+    if systemd_service:
+        result = subprocess.run(
+            ["systemctl", "is-active", systemd_service], capture_output=True, text=True
+        )
+        active_state = result.stdout.strip()
+        if active_state in ("active", "activating", "reloading"):
+            return {"status": "ready" if port_up else "starting", "pid": None, "managed": False}
         return {"status": "stopped", "pid": None, "managed": False}
+
+    if port_up:
+        return {"status": "ready", "pid": None, "managed": False}
+    return {"status": "stopped", "pid": None, "managed": False}
 
 
 @app.get("/api/power")
@@ -1235,6 +1313,46 @@ def api_gpu():
         return JSONResponse({"error": "nvidia-smi failed"}, status_code=500)
 
 
+QUANT_PATTERNS = [
+    ("NVFP4", "NVFP4"),
+    ("IQ3_KS", "IQ3_KS"),
+    ("IQ4_XS", "IQ4_XS"),
+    ("Q8_K_P", "Q8_K_P"),
+    ("Q8_K_XL", "Q8_K_XL"),
+    ("Q8_0", "Q8_0"),
+    ("Q6_K", "Q6_K"),
+    ("Q5_K_M", "Q5_K_M"),
+    ("Q4_K_M", "Q4_K_M"),
+    ("Q4_0", "Q4_0"),
+    ("BF16", "BF16"),
+    ("FP16", "FP16"),
+    ("FP8", "FP8"),
+]
+
+
+def get_quant(model: dict) -> str:
+    """Best-effort detection of the model's quantization/precision."""
+    text = " ".join(
+        [
+            model.get("name", ""),
+            model.get("description", ""),
+            " ".join(model.get("cmd", [])),
+        ]
+    ).upper()
+    for pattern, label in QUANT_PATTERNS:
+        if pattern in text:
+            return label
+    cmd_args = " ".join(model.get("cmd", []))
+    if "--dtype" in cmd_args:
+        if "half" in cmd_args or "float16" in cmd_args or "fp16" in cmd_args:
+            return "FP16"
+        if "bfloat16" in cmd_args or "bf16" in cmd_args:
+            return "BF16"
+    if re.search(r"(?m)^--bf16\b", "\n".join(model.get("cmd", []))):
+        return "BF16"
+    return ""
+
+
 @app.get("/api/status")
 def api_status():
     try:
@@ -1257,6 +1375,8 @@ def api_status():
             "path": model.get("path", ""),
             "supports_offload": model.get("supports_offload", False),
             "token_usage": usage,
+            "quant": get_quant(model),
+            "vram_gb": model.get("vram_gb"),
             **get_model_status(model_id),
         }
     return JSONResponse(result)
@@ -1353,12 +1473,9 @@ def kill_port(port: int):
         for pid_str in result.stdout.split():
             pid = int(pid_str.strip())
             try:
-                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
+                pass
     except Exception:
         pass
 
@@ -1405,12 +1522,25 @@ def api_logs(model_id: str):
     if model_id not in MODELS:
         return JSONResponse({"error": "Unknown model"}, status_code=404)
     log_path = f"/mnt/raid1_nvme/JanusPro7b/logs/{model_id}.log"
+    text = ""
     try:
         with open(log_path) as f:
             lines = f.readlines()
-            return JSONResponse({"logs": "".join(lines[-200:])})
+            text = "".join(lines[-200:])
     except FileNotFoundError:
-        return JSONResponse({"logs": ""})
+        pass
+    if not text:
+        svc = MODELS[model_id].get("systemd_service")
+        if svc:
+            try:
+                out = subprocess.run(
+                    ["journalctl", "-u", svc, "-n", "200", "--no-pager"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                text = out.stdout
+            except Exception:
+                pass
+    return JSONResponse({"logs": text})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1563,45 +1693,111 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .analytics-charts { grid-template-columns: 1fr; }
   }
 
-  .category-label {
+  .table-bar {
     max-width: 1200px;
-    margin: 24px auto 8px;
+    margin: 24px auto 12px;
     padding: 0 20px;
-    font-size: 0.8em;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: #52525b;
-  }
-  .grid {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 20px 8px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    display: flex;
+    align-items: center;
     gap: 12px;
   }
-  .card {
+  .search-input {
+    flex: 1;
+    max-width: 420px;
     background: #1a1b23;
     border: 1px solid #27272a;
-    border-radius: 14px;
-    padding: 20px;
-    transition: border-color 0.2s;
+    border-radius: 8px;
+    color: #e4e4e7;
+    padding: 9px 14px;
+    font-size: 0.9em;
+    font-family: inherit;
+    outline: none;
   }
-  .card:hover { border-color: #3f3f46; }
-  .card-top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 12px;
+  .search-input:focus { border-color: #667eea; }
+  .search-input::placeholder { color: #52525b; }
+  .table-count {
+    margin-left: auto;
+    color: #52525b;
+    font-size: 0.8em;
+    font-weight: 600;
+    white-space: nowrap;
   }
-  .card-icon {
-    width: 38px; height: 38px; border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 16px; font-weight: 700;
+  .table-wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px 12px;
   }
-  .card h2 { font-size: 1.05em; font-weight: 700; margin-bottom: 2px; }
-  .card .desc { color: #71717a; font-size: 0.82em; margin-bottom: 14px; line-height: 1.4; }
+  .table-card {
+    background: #1a1b23;
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    overflow-x: auto;
+  }
+  #model-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 0.85em;
+  }
+  #model-table thead th:nth-child(1) { width: 170px; }
+  #model-table thead th:nth-child(2) { width: 74px; }
+  #model-table thead th:nth-child(3) { width: 80px; }
+  #model-table thead th:nth-child(4) { width: 60px; }
+  #model-table thead th:nth-child(5) { width: 130px; }
+  #model-table thead th:nth-child(7) { width: 84px; }
+  #model-table thead th:nth-child(8) { width: 76px; }
+  #model-table thead th:nth-child(9) { width: 84px; }
+  #model-table thead th:nth-child(10) { width: 56px; }
+  #model-table thead th:nth-child(11) { width: 100px; }
+  #model-table thead th {
+    text-align: left;
+    padding: 12px 10px;
+    font-size: 0.7em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #71717a;
+    border-bottom: 1px solid #27272a;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  #model-table thead th:hover { color: #e4e4e7; }
+  #model-table thead th.sorted-asc::after { content: ' \25b2'; color: #667eea; }
+  #model-table thead th.sorted-desc::after { content: ' \25bc'; color: #667eea; }
+  #model-table tbody td {
+    padding: 9px 10px;
+    border-bottom: 1px solid #202027;
+    vertical-align: middle;
+  }
+  #model-table tbody tr.model-row:hover td { background: #1f2028; }
+  .td-name { font-weight: 600; overflow-wrap: break-word; }
+  .row-icon {
+    display: inline-flex;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    margin-right: 8px;
+  }
+  .name-link { color: #e4e4e7; text-decoration: none; }
+  .name-link.active:hover { color: #818cf8; text-decoration: underline; }
+  .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; color: #a1a1aa; font-size: 0.92em; }
+  .td-tags { white-space: normal; line-height: 1.7; }
+  .td-tags .tag-badge { margin: 1px 3px 1px 0; }
+  .cat-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.78em;
+    font-weight: 700;
+    white-space: nowrap;
+    margin-right: 8px;
+  }
+  .td-desc { overflow-wrap: break-word; }
+  .desc-text { color: #71717a; font-size: 0.88em; line-height: 1.35; }
+  .dim { color: #3f3f46; }
+  .td-status { white-space: normal; }
   .tag-badge {
     display: inline-block;
     background: #1e1e2e; color: #71717a;
@@ -1609,18 +1805,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     font-size: 0.7em; font-weight: 500;
     border: 1px solid #27272a;
   }
-  .card .port-badge {
-    display: inline-block;
-    background: #27272a; color: #a1a1aa;
-    padding: 2px 8px; border-radius: 4px;
-    font-size: 0.72em; font-weight: 600;
-    font-family: monospace;
-    margin-bottom: 12px;
-  }
-  .status-row {
-    display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
-  }
-  .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; margin-right: 6px; vertical-align: middle; }
   .status-dot.stopped { background: #52525b; }
   .status-dot.starting { background: #facc15; animation: pulse 1.5s infinite; }
   .status-dot.ready { background: #22c55e; box-shadow: 0 0 8px #22c55e55; }
@@ -1629,77 +1814,73 @@ HTML_PAGE = r"""<!DOCTYPE html>
     font-size: 0.78em; color: #a1a1aa; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.06em;
   }
-  .card-actions { display: flex; gap: 8px; }
-  .btn {
-    flex: 1; padding: 9px 14px; border: none; border-radius: 8px;
-    font-weight: 600; font-size: 0.85em; cursor: pointer;
-    transition: opacity 0.15s, transform 0.1s;
-    display: flex; align-items: center; justify-content: center; gap: 5px;
-    text-decoration: none;
-  }
-  .btn:hover { opacity: 0.85; }
-  .btn:active { transform: scale(0.97); }
-  .btn-start { background: #22c55e; color: #fff; }
-  .btn-stop { background: #ef4444; color: #fff; }
-  .btn-open { background: transparent; border: 1px solid #3f3f46; color: #e4e4e7; }
-  .btn-open:hover { background: #27272a; }
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
-  .offload-row {
-    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-    font-size: 0.78em; color: #a1a1aa;
-  }
-  .offload-row label { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
-  .offload-toggle {
+  .switch {
     position: relative; width: 36px; height: 20px; appearance: none;
     background: #27272a; border-radius: 10px; cursor: pointer; transition: background 0.2s;
-    outline: none; border: 1px solid #3f3f46; flex-shrink: 0;
+    outline: none; border: 1px solid #3f3f46; flex-shrink: 0; margin: 0; vertical-align: middle;
   }
-  .offload-toggle:checked { background: #3b82f6; border-color: #3b82f6; }
-  .offload-toggle::after {
+  .switch:checked { background: #22c55e; border-color: #22c55e; }
+  .switch::after {
     content: ''; position: absolute; top: 2px; left: 2px;
     width: 14px; height: 14px; border-radius: 50%;
     background: #e4e4e7; transition: transform 0.2s;
   }
-  .offload-toggle:checked::after { transform: translateX(16px); }
-  .log-toggle {
-    margin-top: 10px; font-size: 0.75em; color: #52525b;
-    cursor: pointer; user-select: none;
+  .switch:checked::after { transform: translateX(16px); }
+  .switch:disabled { opacity: 0.35; cursor: not-allowed; }
+  .star {
+    background: none; border: none; padding: 2px 6px;
+    font-size: 1.15em; line-height: 1; cursor: pointer;
+    color: #3f3f46; transition: color 0.15s, transform 0.1s;
   }
-  .log-toggle:hover { color: #a1a1aa; }
-  .log-box {
-    margin-top: 6px; background: #0f1117; border: 1px solid #27272a;
-    border-radius: 6px; padding: 10px;
+  .star:hover { color: #facc15; transform: scale(1.15); }
+  .star.on { color: #facc15; text-shadow: 0 0 10px #facc1566; }
+  .log-row td { padding: 0 10px 12px; background: #15161c; border-bottom: 1px solid #202027; }
+  .row-logbox {
+    background: #0f1117; border: 1px solid #27272a;
+    border-radius: 8px; padding: 10px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.7em; color: #71717a;
-    max-height: 180px; overflow-y: auto;
+    font-size: 0.72em; color: #9ca3af;
+    max-height: 240px; overflow-y: auto;
     white-space: pre-wrap; word-break: break-all;
-    display: none;
   }
-  .log-box.open { display: block; }
-  .filter-bar {
+  .alllogs {
     max-width: 1200px;
-    margin: 0 auto 16px;
+    margin: 4px auto 24px;
     padding: 0 20px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
   }
-  .filter-label {
-    font-size: 0.78em; font-weight: 600; color: #52525b;
-    text-transform: uppercase; letter-spacing: 0.06em;
-    margin-right: 4px;
+  .alllogs-panel {
+    background: #1a1b23;
+    border: 1px solid #27272a;
+    border-radius: 12px;
+    overflow: hidden;
   }
-  .filter-chip {
-    padding: 5px 14px; border-radius: 20px;
-    font-size: 0.78em; font-weight: 600;
-    border: 1px solid #27272a; background: transparent; color: #a1a1aa;
-    cursor: pointer; transition: all 0.15s; user-select: none;
+  .alllogs-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px; cursor: pointer; user-select: none;
   }
-  .filter-chip:hover { border-color: #3f3f46; color: #e4e4e7; }
-  .filter-chip.active { background: #27272a; color: #e4e4e7; border-color: #3f3f46; }
-  .card.hidden { display: none; }
-  .category-section.hidden { display: none; }
+  .alllogs-head:hover { background: #1f2028; }
+  .alllogs-title { font-weight: 700; font-size: 0.9em; }
+  .alllogs-count { color: #52525b; font-size: 0.78em; }
+  .alllogs-chev { margin-left: auto; color: #52525b; font-size: 0.9em; }
+  .alllogs-body {
+    border-top: 1px solid #27272a;
+    max-height: 520px; overflow-y: auto;
+    padding: 14px 18px;
+  }
+  .alllogs-body.collapsed { display: none; }
+  .alllog-sec { margin-bottom: 16px; }
+  .alllog-sec:last-child { margin-bottom: 4px; }
+  .alllog-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.82em; }
+  .alllog-name { font-weight: 600; }
+  .alllog-port { color: #52525b; font-family: monospace; font-size: 0.9em; }
+  .alllog-pre {
+    background: #0f1117; border: 1px solid #27272a; border-radius: 8px;
+    padding: 10px; margin: 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.72em; color: #9ca3af;
+    max-height: 220px; overflow: auto;
+    white-space: pre-wrap; word-break: break-all;
+  }
   .footer {
     text-align: center; padding: 24px; color: #3f3f46; font-size: 0.75em;
   }
@@ -1811,201 +1992,194 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
-<div class="filter-bar" id="filter-bar">
-  <span class="filter-label">Filter</span>
-  <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">All</button>
+<div class="table-bar">
+  <input type="search" class="search-input" id="search" placeholder="Search models, tags, ports, quant…">
+  <span class="table-count" id="table-count"></span>
 </div>
 
-<div class="filter-bar" id="sort-bar">
-  <span class="filter-label">Sort</span>
-  <button class="filter-chip active" data-sort="usage" onclick="setSort('usage')">Most Used</button>
-  <button class="filter-chip" data-sort="name" onclick="setSort('name')">Name A–Z</button>
-  <button class="filter-chip" data-sort="status" onclick="setSort('status')">Status</button>
+<div class="table-wrap">
+  <div class="table-card">
+    <table id="model-table">
+      <thead>
+        <tr>
+          <th data-key="name">Name</th>
+          <th data-key="quant">Quant</th>
+          <th data-key="vram">VRAM Usage</th>
+          <th data-key="port">Port</th>
+          <th data-key="tags">Tags</th>
+          <th data-key="type">Type / Description</th>
+          <th data-key="offload">CPU Offload</th>
+          <th data-key="logs">Show Logs</th>
+          <th data-key="run">Start/Stop</th>
+          <th data-key="fav">Favorite</th>
+          <th data-key="status">Status</th>
+        </tr>
+      </thead>
+      <tbody id="model-tbody"></tbody>
+    </table>
+  </div>
 </div>
 
-<div id="content"></div>
+<div class="alllogs">
+  <div class="alllogs-panel">
+    <div class="alllogs-head" onclick="toggleAllLogs()">
+      <span class="alllogs-title">All Model Logs</span>
+      <span class="alllogs-count" id="alllogs-count">collapsed</span>
+      <span class="alllogs-chev" id="alllogs-chev">▸</span>
+    </div>
+    <div class="alllogs-body collapsed" id="alllogs-body"></div>
+  </div>
+</div>
 
 <div class="footer">Load &middot; Use &middot; Unload</div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const HOST = location.hostname;
-const CATEGORY_ORDER = ['Image', 'Video', 'Audio', 'LLM', 'Tools'];
+const tbody = document.getElementById('model-tbody');
 let currentModels = {};
-let activeFilter = 'all';
-let activeSort = 'usage';
-let filtersBuilt = false;
+let sortKey = 'name';
+let sortDir = 1;
+let searchQuery = '';
+let rowMap = {};
+let logIntervals = {};
+let favorites = new Set();
+try { favorites = new Set(JSON.parse(localStorage.getItem('fav_models') || '[]')); } catch (e) {}
 
-function setSort(sort) {
-  activeSort = sort;
-  document.querySelectorAll('#sort-bar .filter-chip').forEach(b => {
-    b.classList.toggle('active', b.dataset.sort === sort);
+function saveFavs() {
+  try { localStorage.setItem('fav_models', JSON.stringify([...favorites])); } catch (e) {}
+}
+
+function toggleFav(id) {
+  if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
+  saveFavs();
+  const star = document.getElementById('star-' + id);
+  if (star) star.classList.toggle('on', favorites.has(id));
+}
+
+function sortValue(id, m, key) {
+  switch (key) {
+    case 'name': return m.name.toLowerCase();
+    case 'quant': return (m.quant || '').toLowerCase() || '~';
+    case 'vram': return m.vram_gb == null ? -1 : m.vram_gb;
+    case 'port': return m.port;
+    case 'tags': return (m.tags || []).join(', ').toLowerCase();
+    case 'type': return (m.category || '') + ' :: ' + m.name.toLowerCase();
+    case 'offload': return m.supports_offload ? 1 : 0;
+    case 'logs': return rowMap[id] && rowMap[id].logOpen ? 1 : 0;
+    case 'run': return m.status === 'stopped' ? 0 : 1;
+    case 'fav': return favorites.has(id) ? 1 : 0;
+    case 'status': { const o = { ready: 0, starting: 1, stopped: 2 }; return o[m.status] != null ? o[m.status] : 3; }
+  }
+  return '';
+}
+
+function sortRows() {
+  const ids = Object.keys(currentModels);
+  ids.sort((a, b) => {
+    const va = sortValue(a, currentModels[a], sortKey);
+    const vb = sortValue(b, currentModels[b], sortKey);
+    let r = va < vb ? -1 : (va > vb ? 1 : 0);
+    if (r === 0) r = currentModels[a].name.localeCompare(currentModels[b].name);
+    return r * sortDir;
   });
+  return ids;
+}
+
+function matchesSearch(m) {
+  if (!searchQuery) return true;
+  const q = searchQuery.toLowerCase();
+  const hay = [m.name, m.description || '', m.category || '', String(m.port), (m.tags || []).join(' '), m.quant || ''].join(' ').toLowerCase();
+  return hay.includes(q);
+}
+
+document.querySelectorAll('#model-table th[data-key]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.key;
+    if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+    document.querySelectorAll('#model-table th[data-key]').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+    th.classList.add(sortDir === 1 ? 'sorted-asc' : 'sorted-desc');
+    renderAll(currentModels);
+  });
+});
+
+document.getElementById('search').addEventListener('input', e => {
+  searchQuery = e.target.value.trim();
   renderAll(currentModels);
+});
+
+function buildRow(id, m) {
+  const tr = document.createElement('tr');
+  tr.className = 'model-row';
+  const initial = (m.name || '?').trim().charAt(0);
+  tr.innerHTML = `
+    <td class="td-name"><span class="row-icon" style="background:${m.color}18;color:${m.color}">${initial}</span><a class="name-link" id="link-${id}" target="_blank" rel="noopener">${m.name}</a></td>
+    <td class="mono">${m.quant || '—'}</td>
+    <td class="mono">${m.vram_gb ? '~' + m.vram_gb + ' GB' : '—'}</td>
+    <td class="mono">${m.port}</td>
+    <td class="td-tags">${(m.tags || []).map(t => `<span class="tag-badge">${t}</span>`).join('')}</td>
+    <td class="td-desc"><span class="cat-badge" style="background:${m.color}18;color:${m.color}">${m.category}</span><span class="desc-text">${m.description}</span></td>
+    <td>${m.supports_offload ? `<input type="checkbox" class="switch" id="offload-${id}">` : '<span class="dim">—</span>'}</td>
+    <td><input type="checkbox" class="switch" onchange="toggleRowLogs('${id}', this.checked)"></td>
+    <td><input type="checkbox" class="switch" id="runsw-${id}" onchange="toggleRun('${id}', this.checked)" disabled></td>
+    <td><button class="star" id="star-${id}" title="favorite" onclick="toggleFav('${id}')">&#9733;</button></td>
+    <td class="td-status"><span class="status-dot" id="dot-${id}"></span><span class="status-text" id="statustext-${id}"></span></td>`;
+  const logTr = document.createElement('tr');
+  logTr.className = 'log-row';
+  logTr.style.display = 'none';
+  logTr.innerHTML = `<td colspan="11"><div class="row-logbox" id="rowlog-${id}"></div></td>`;
+  rowMap[id] = { tr: tr, logTr: logTr, logOpen: false };
+  tbody.appendChild(tr);
+  tbody.appendChild(logTr);
 }
 
-function buildFilters(models) {
-  if (filtersBuilt) return;
-  const tagSet = new Set();
-  for (const m of Object.values(models)) {
-    (m.tags || []).forEach(t => tagSet.add(t));
-  }
-  const bar = document.getElementById('filter-bar');
-  const sorted = [...tagSet].sort();
-  for (const tag of sorted) {
-    const btn = document.createElement('button');
-    btn.className = 'filter-chip';
-    btn.dataset.filter = tag;
-    btn.textContent = tag;
-    btn.onclick = () => setFilter(tag);
-    bar.appendChild(btn);
-  }
-  // Add "running" filter
-  const runBtn = document.createElement('button');
-  runBtn.className = 'filter-chip';
-  runBtn.dataset.filter = '_running';
-  runBtn.textContent = 'running';
-  runBtn.onclick = () => setFilter('_running');
-  bar.appendChild(runBtn);
-  filtersBuilt = true;
-}
-
-function setFilter(f) {
-  activeFilter = f;
-  document.querySelectorAll('.filter-chip').forEach(c => {
-    c.classList.toggle('active', c.dataset.filter === f);
-  });
-  applyFilter();
-}
-
-function applyFilter() {
-  for (const [id, m] of Object.entries(currentModels)) {
-    const card = document.getElementById('card-' + id);
-    if (!card) continue;
-    let show = true;
-    if (activeFilter === '_running') {
-      show = m.status !== 'stopped';
-    } else if (activeFilter !== 'all') {
-      show = (m.tags || []).includes(activeFilter);
+function updateRow(id, m) {
+  const dot = document.getElementById('dot-' + id);
+  const st = document.getElementById('statustext-' + id);
+  if (dot) dot.className = 'status-dot ' + m.status;
+  if (st) st.textContent = m.status === 'ready' ? 'Running' : m.status === 'starting' ? 'Starting…' : 'Stopped';
+  const link = document.getElementById('link-' + id);
+  if (link) {
+    if (m.status === 'ready') {
+      link.href = (m.protocol || 'http') + '://' + HOST + ':' + m.port + (m.path || '');
+      link.classList.add('active');
+    } else {
+      link.removeAttribute('href');
+      link.classList.remove('active');
     }
-    card.classList.toggle('hidden', !show);
   }
-  // Hide empty category sections
-  for (const cat of CATEGORY_ORDER) {
-    const label = document.getElementById('label-' + cat);
-    const grid = document.getElementById('grid-' + cat);
-    if (!label || !grid) continue;
-    const visibleCards = grid.querySelectorAll('.card:not(.hidden)');
-    const hide = visibleCards.length === 0;
-    label.classList.toggle('hidden', hide);
-    grid.classList.toggle('hidden', hide);
-  }
+  const runsw = document.getElementById('runsw-' + id);
+  if (runsw) { runsw.checked = m.status !== 'stopped'; runsw.disabled = m.status === 'starting'; }
+  const off = document.getElementById('offload-' + id);
+  if (off) off.disabled = m.status !== 'stopped';
+  const star = document.getElementById('star-' + id);
+  if (star) star.classList.toggle('on', favorites.has(id));
 }
 
 function renderAll(models) {
   currentModels = models;
-  buildFilters(models);
-  const content = document.getElementById('content');
   let runCount = 0;
-
-  // Group by category
-  const groups = {};
   for (const [id, m] of Object.entries(models)) {
-    if (!groups[m.category]) groups[m.category] = [];
-    groups[m.category].push([id, m]);
+    if (!rowMap[id]) buildRow(id, m);
     if (m.status !== 'stopped') runCount++;
+    updateRow(id, m);
   }
-
-  // Sort within each category
-  for (const cat in groups) {
-    const list = groups[cat];
-    if (activeSort === 'usage') {
-      list.sort((a, b) => (b[1].token_usage || 0) - (a[1].token_usage || 0));
-    } else if (activeSort === 'name') {
-      list.sort((a, b) => a[1].name.localeCompare(b[1].name));
-    } else if (activeSort === 'status') {
-      const order = { starting: 0, ready: 1, stopped: 2 };
-      list.sort((a, b) => (order[a[1].status] ?? 3) - (order[b[1].status] ?? 3));
-    }
-  }
-
   document.getElementById('running-count').textContent = runCount + ' model' + (runCount !== 1 ? 's' : '') + ' running';
 
-  // Build/rebuild HTML
-  if (!content.dataset.rendered) {
-    let html = '';
-    for (const cat of CATEGORY_ORDER) {
-      if (!groups[cat]) continue;
-      html += `<div class="category-label" id="label-${cat}">${cat}</div><div class="grid" id="grid-${cat}">`;
-      for (const [id, m] of groups[cat]) {
-        const tagBadges = (m.tags || []).map(t => `<span class="tag-badge">${t}</span>`).join('');
-        const vramBadge = m.vram_gb ? `<span class="vram-badge"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6" y2="8"></line><line x1="6" y1="18" x2="6" y2="20"></line><line x1="18" y1="6" x2="18" y2="8"></line><line x1="18" y1="18" x2="18" y2="20"></line><line x1="6" y1="12" x2="18" y2="12"></line></svg> ${m.vram_gb}GB</span>` : '';
-        html += `
-        <div class="card" id="card-${id}" data-tags="${(m.tags||[]).join(',')}">
-          <div class="card-top">
-            <div>
-              <h2>${m.name}</h2>
-              <div class="desc">${m.description}</div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-                <span class="port-badge">:${m.port}</span>
-                ${vramBadge}
-                ${tagBadges}
-              </div>
-            </div>
-            <div class="card-icon" style="background:${m.color}18;color:${m.color}">&bull;</div>
-          </div>
-          <div class="status-row">
-            <div class="status-dot" id="dot-${id}"></div>
-            <span class="status-text" id="status-${id}"></span>
-          </div>
-          ${m.supports_offload ? `<div class="offload-row" id="offload-row-${id}"><label><input type="checkbox" class="offload-toggle" id="offload-${id}"> CPU Offload</label></div>` : ''}
-          <div class="card-actions" id="actions-${id}"></div>
-          <div class="log-toggle" onclick="toggleLog('${id}')">view logs</div>
-          <div class="log-box" id="log-${id}"></div>
-        </div>`;
-      }
-      html += '</div>';
-    }
-    content.innerHTML = html;
-    content.dataset.rendered = '1';
-  } else {
-    // Reorder existing cards within each grid (without full rebuild)
-    for (const cat of CATEGORY_ORDER) {
-      if (!groups[cat]) continue;
-      const grid = document.getElementById('grid-' + cat);
-      if (!grid) continue;
-      for (const [id] of groups[cat]) {
-        const card = document.getElementById('card-' + id);
-        if (card) grid.appendChild(card);
-      }
-    }
+  for (const id of sortRows()) {
+    tbody.appendChild(rowMap[id].tr);
+    tbody.appendChild(rowMap[id].logTr);
   }
 
-  // Update statuses
+  let visible = 0;
   for (const [id, m] of Object.entries(models)) {
-    const dot = document.getElementById('dot-' + id);
-    const st = document.getElementById('status-' + id);
-    const actions = document.getElementById('actions-' + id);
-    if (!dot) continue;
-
-    dot.className = 'status-dot ' + m.status;
-    st.textContent = m.status === 'ready' ? 'Running' : m.status === 'starting' ? 'Starting...' : 'Stopped';
-
-    const offloadRow = document.getElementById('offload-row-' + id);
-    if (offloadRow) offloadRow.style.display = m.status === 'stopped' ? 'flex' : 'none';
-
-    const proto = m.protocol || 'http';
-    if (m.status === 'stopped') {
-      actions.innerHTML = `<button class="btn btn-start" onclick="startModel('${id}')">Start</button>`;
-    } else if (m.status === 'starting') {
-      actions.innerHTML = `<button class="btn btn-stop" onclick="stopModel('${id}')">Stop</button>
-        <button class="btn btn-open" disabled>Starting...</button>`;
-    } else {
-      actions.innerHTML = `<button class="btn btn-stop" onclick="stopModel('${id}')">Stop</button>
-        <a class="btn btn-open" href="${proto}://${HOST}:${m.port}${m.path||''}" target="_blank" rel="noopener">Open</a>`;
-    }
+    const show = matchesSearch(m);
+    if (show) visible++;
+    rowMap[id].tr.style.display = show ? '' : 'none';
+    rowMap[id].logTr.style.display = (show && rowMap[id].logOpen) ? '' : 'none';
   }
-  applyFilter();
+  document.getElementById('table-count').textContent = visible + ' / ' + Object.keys(models).length + ' models';
+  document.getElementById('alllogs-count').textContent = allLogsOpen ? runCount + ' model' + (runCount !== 1 ? 's' : '') + ' streaming' : 'collapsed';
 }
 
 async function refresh() {
@@ -2015,43 +2189,89 @@ async function refresh() {
   } catch (e) {}
 }
 
-async function startModel(id) {
-  const btn = event.target;
-  btn.disabled = true; btn.textContent = 'Starting...';
-  const cb = document.getElementById('offload-' + id);
-  const offload = cb && cb.checked ? 'true' : 'false';
-  await fetch('/api/start/' + id + '?offload=' + offload, { method: 'POST' });
-  setTimeout(refresh, 500);
+async function toggleRun(id, on) {
+  if (on) {
+    const cb = document.getElementById('offload-' + id);
+    const offload = cb && cb.checked ? 'true' : 'false';
+    await fetch('/api/start/' + id + '?offload=' + offload, { method: 'POST' });
+  } else {
+    await fetch('/api/stop/' + id, { method: 'POST' });
+  }
+  setTimeout(refresh, 600);
 }
 
-async function stopModel(id) {
-  const btn = event.target;
-  btn.disabled = true; btn.textContent = 'Stopping...';
-  await fetch('/api/stop/' + id, { method: 'POST' });
-  setTimeout(refresh, 500);
+async function fetchRowLog(id) {
+  const e = rowMap[id];
+  if (!e || !e.logOpen) return;
+  const box = document.getElementById('rowlog-' + id);
+  if (!box) return;
+  try {
+    const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    const r = await fetch('/api/logs/' + id);
+    const d = await r.json();
+    box.textContent = d.logs || '(no logs yet)';
+    if (wasAtBottom) box.scrollTop = box.scrollHeight;
+  } catch (err) {
+    box.textContent = '(error loading logs)';
+  }
 }
 
-const logIntervals = {};
-async function toggleLog(id) {
-  const box = document.getElementById('log-' + id);
-  if (box.classList.contains('open')) {
-    box.classList.remove('open');
-    if (logIntervals[id]) { clearInterval(logIntervals[id]); delete logIntervals[id]; }
-    return;
+function toggleRowLogs(id, open) {
+  const e = rowMap[id];
+  if (!e) return;
+  e.logOpen = open;
+  e.logTr.style.display = open ? '' : 'none';
+  if (open) {
+    fetchRowLog(id);
+    if (!logIntervals[id]) logIntervals[id] = setInterval(() => fetchRowLog(id), 3000);
+  } else if (logIntervals[id]) {
+    clearInterval(logIntervals[id]);
+    delete logIntervals[id];
   }
-  async function fetchLog() {
-    try {
-      const r = await fetch('/api/logs/' + id);
-      const data = await r.json();
-      const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-      box.textContent = data.logs || '(no logs yet)';
-      if (wasAtBottom) box.scrollTop = box.scrollHeight;
-    } catch (e) { box.textContent = '(error)'; }
+}
+
+let allLogsOpen = false;
+
+function toggleAllLogs() {
+  allLogsOpen = !allLogsOpen;
+  document.getElementById('alllogs-body').classList.toggle('collapsed', !allLogsOpen);
+  document.getElementById('alllogs-chev').textContent = allLogsOpen ? '\u25be' : '\u25b8';
+  document.getElementById('alllogs-count').textContent = allLogsOpen ? 'streaming…' : 'collapsed';
+  if (allLogsOpen) updateAllLogs();
+}
+
+function runningIds() {
+  return Object.keys(currentModels).filter(id => currentModels[id].status !== 'stopped');
+}
+
+async function updateAllLogs() {
+  const ids = runningIds();
+  if (!allLogsOpen) return;
+  const body = document.getElementById('alllogs-body');
+  for (const id of ids) {
+    const m = currentModels[id];
+    let pre = document.getElementById('alllogpre-' + id);
+    if (!pre) {
+      const sec = document.createElement('div');
+      sec.className = 'alllog-sec';
+      sec.dataset.id = id;
+      sec.innerHTML = `<div class="alllog-head"><span class="status-dot ${m.status}"></span><span class="alllog-name">${m.name}</span><span class="alllog-port">${m.protocol || 'http'}://${HOST}:${m.port}</span></div><pre class="alllog-pre" id="alllogpre-${id}"></pre>`;
+      body.appendChild(sec);
+      pre = document.getElementById('alllogpre-' + id);
+    }
+    (async () => {
+      try {
+        const wasAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+        const r = await fetch('/api/logs/' + id);
+        const d = await r.json();
+        pre.textContent = d.logs || '(no logs yet)';
+        if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
+      } catch (e) {}
+    })();
   }
-  await fetchLog();
-  box.classList.add('open');
-  box.scrollTop = box.scrollHeight;
-  logIntervals[id] = setInterval(fetchLog, 3000);
+  for (const sec of Array.from(body.querySelectorAll('.alllog-sec'))) {
+    if (!ids.includes(sec.dataset.id)) sec.remove();
+  }
 }
 
 // ── Token analytics ──────────────────────────────────────────────
@@ -2250,6 +2470,7 @@ setInterval(refresh, 5000);
 setInterval(refreshGpu, 3000);
 setInterval(refreshTokens, 60000);
 setInterval(refreshPower, 60000);
+setInterval(() => { if (allLogsOpen) updateAllLogs(); }, 3000);
 </script>
 </body>
 </html>
