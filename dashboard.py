@@ -910,9 +910,12 @@ MODELS = {
         "name": "Qwen3.6 27B NVFP4",
         "description": "Unsloth Qwen3.6 27B NVFP4 quantized - Fast vLLM inference",
         "port": 8088,
-        "cmd": ["/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4/venv/bin/python", "-m", "vllm.entrypoints.api_server", "--model", "unsloth/Qwen3.6-27B-NVFP4", "--port", "8088"],
+        "cmd": ["/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4/venv/bin/vllm", "serve", "unsloth/Qwen3.6-27B-NVFP4",
+                "--port", "8088", "--host", "0.0.0.0",
+                "--gpu-memory-utilization", "0.90",
+                "--max-num-seqs", "256"],
         "cwd": "/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4",
-        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "env": {"CUDA_VISIBLE_DEVICES": "0", "FLASHINFER_DISABLE_VERSION_CHECK": "1"},
         "protocol": "http",
         "category": "LLM",
         "icon": "cpu",
@@ -923,11 +926,15 @@ MODELS = {
     },
     "qwen38_27b_nvfp4": {
         "name": "Qwen3.8 27B NVFP4",
-        "description": "Unsloth Qwen3.8 27B NVFP4 quantized - Fast vLLM inference",
+        "description": "Unsloth Qwen3.8 27B NVFP4 quantized - ~1.5x faster than BF16, vLLM + MTP spec decode",
         "port": 8094,
-        "cmd": ["/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4/venv/bin/python", "-m", "vllm.entrypoints.api_server", "--model", "unsloth/Qwen3.8-27B-NVFP4", "--port", "8094"],
+        "cmd": ["/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4/venv/bin/vllm", "serve", "unsloth/Qwen3.8-27B-NVFP4",
+                "--port", "8094", "--host", "0.0.0.0",
+                "--gpu-memory-utilization", "0.90",
+                "--max-num-seqs", "256",
+                "--speculative-config", '{"method": "mtp", "num_speculative_tokens": 2}'],
         "cwd": "/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4",
-        "env": {"CUDA_VISIBLE_DEVICES": "0"},
+        "env": {"CUDA_VISIBLE_DEVICES": "0", "FLASHINFER_DISABLE_VERSION_CHECK": "1"},
         "protocol": "http",
         "category": "LLM",
         "icon": "cpu",
@@ -1855,7 +1862,23 @@ HTML_PAGE = r"""<!DOCTYPE html>
     font-size: 0.72em; color: #9ca3af;
     max-height: 220px; overflow: auto;
     white-space: pre-wrap; word-break: break-all;
+    user-select: text; -webkit-user-select: text;
   }
+  .row-logbox-wrap { display: flex; flex-direction: column; }
+  .row-logbox-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 0; margin-bottom: 4px; font-size: 0.75em;
+    color: #71717a; font-weight: 600;
+  }
+  .row-logbox-header span { white-space: nowrap; }
+  .row-logbox { user-select: text; -webkit-user-select: text; }
+  .copy-btn {
+    background: #27272a; border: 1px solid #3f3f46; border-radius: 6px;
+    color: #a1a1aa; padding: 3px 10px; font-size: 0.75em; cursor: pointer;
+    font-family: inherit; transition: all 0.15s;
+  }
+  .copy-btn:hover { background: #3f3f46; color: #e4e4e7; }
+  .copy-btn.copied { background: #22c55e; color: #fff; border-color: #22c55e; }
   .footer {
     text-align: center; padding: 24px; color: #3f3f46; font-size: 0.75em;
   }
