@@ -96,7 +96,8 @@ out of scope — do not touch them.
 - [ ] **Step 1: Install dev deps**
 
 ```bash
-/mnt/raid1_nvme/JanusPro7b/dashboard-venv/bin/pip install -q pytest httpx
+# NOTE: dashboard-venv/bin/pip has a stale shebang (/mnt/raid1_sata/...) — use -m pip
+/mnt/raid1_nvme/JanusPro7b/dashboard-venv/bin/python -m pip install -q pytest httpx
 /mnt/raid1_nvme/JanusPro7b/dashboard-venv/bin/python -c "import pytest, httpx; print('dev deps ok')"
 ```
 
