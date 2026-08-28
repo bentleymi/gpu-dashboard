@@ -1443,8 +1443,12 @@ def test_unpatch_removes_model_then_empty_provider(scratch, real_opencode_copy):
     d.opencode_unpatch("myalias-8100", "myalias")
     after = cfg()
     assert "myalias-8100" not in after["provider"]
-    for pid in before:
-        assert after["provider"].get(pid) == before[pid], pid
+    for pid in before["provider"]:
+        assert after["provider"].get(pid) == before["provider"][pid], pid
+    # top-level keys (e.g. $schema) preserved
+    for k in before:
+        if k != "provider":
+            assert after.get(k) == before[k], k
 
 
 def test_backup_rotation_keeps_10(scratch, real_opencode_copy):

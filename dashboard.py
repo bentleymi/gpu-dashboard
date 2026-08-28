@@ -1935,6 +1935,86 @@ def alloc_port() -> int:
 
 merge_custom_at_startup()
 
+
+def opencode_backup(path: str) -> None:
+    if not os.path.exists(path):
+        return
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(path, path + f".bak-{ts}")
+    base, fname = os.path.split(path)
+    baks = sorted(f for f in os.listdir(base) if f.startswith(fname + ".bak-"))
+    for old in baks[:-10]:
+        try:
+            os.remove(os.path.join(base, old))
+        except OSError:
+            pass
+
+
+def opencode_patch(alias: str, port: int, name: str, ctx: int, options: dict):
+    path = OPENCODE_CONFIG
+    if not os.path.exists(path):
+        return "opencode config not found — saved to the dashboard only"
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except Exception as e:
+        return f"opencode config unreadable ({e}) — saved to the dashboard only"
+    opencode_backup(path)
+    providers = cfg.setdefault("provider", {})
+    url = f"http://localhost:{port}/v1"
+    provider_id = f"{alias}-{port}"
+    for pid, p in list(providers.items()):
+        if (p.get("options") or {}).get("baseURL") == url:
+            provider_id = pid
+            break
+    provider = providers.get(provider_id) or {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider_id,
+        "options": {"baseURL": url, "apiKey": "local", "setCacheKey": False,
+                    "timeout": False},
+        "models": {},
+    }
+    block = {"name": name, "limit": {"context": ctx, "output": 32768}}
+    if options:
+        block["options"] = options
+    provider.setdefault("models", {})[alias] = block
+    providers[provider_id] = provider
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        return f"opencode config write failed ({e}) — saved to the dashboard only"
+    return None
+
+
+def opencode_unpatch(provider_id: str, alias: str) -> None:
+    path = OPENCODE_CONFIG
+    if not os.path.exists(path) or not provider_id or not alias:
+        return
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except Exception:
+        return
+    providers = cfg.get("provider", {})
+    changed = False
+    if provider_id in providers:
+        models = providers[provider_id].get("models", {})
+        if alias in models:
+            del models[alias]
+            changed = True
+        if not models and provider_id.startswith(alias):
+            del providers[provider_id]
+            changed = True
+    if changed:
+        opencode_backup(path)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, path)
+
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────
