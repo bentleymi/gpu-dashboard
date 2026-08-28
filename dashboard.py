@@ -1646,6 +1646,155 @@ def scan_templates(fid: str) -> list:
             continue
     return found
 
+
+SAMPLING_DEFAULTS = {
+    "llama.cpp": {"temp": 0.8, "top_p": 0.95, "repeat_penalty": 1.10},
+    "vllm": {"temp": 1.0, "top_p": 1.0, "repeat_penalty": 1.0},
+    "vllm-nvfp4": {"temp": 1.0, "top_p": 1.0, "repeat_penalty": 1.0},
+}
+
+
+def _ctx_for_variant(fam: dict, variant: dict) -> list:
+    return variant.get("ctx_options") or fam.get("ctx_options", [])
+
+
+def _resolve_template_path(fid: str, template_val) -> str:
+    """Absolute .jinja path for the resolved template, or None ('builtin')."""
+    fam = MODEL_FAMILIES[fid]
+    val = template_val if template_val else fam.get("default_template", "builtin")
+    if val == "builtin":
+        return None
+    cand = os.path.join(fam["base_dir"], val)
+    if os.path.isfile(cand):
+        return cand
+    for tdir in fam.get("templates", []):
+        cand = os.path.join(fam["base_dir"], tdir, val)
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def resolve_advanced(fid: str, variant: dict, advanced: dict) -> tuple:
+    fam = MODEL_FAMILIES[fid]
+    errors: list = []
+    warnings: list = []
+    adv = advanced or {}
+
+    ctx = adv.get("ctx")
+    if isinstance(ctx, bool) or not isinstance(ctx, int) or not (4096 <= ctx <= 4194304):
+        errors.append({"field": "ctx",
+                       "message": "ctx must be an integer between 4096 and 4194304"})
+        return {}, errors, warnings
+
+    ctxopt = next((c for c in _ctx_for_variant(fam, variant) if c["value"] == ctx), None)
+    custom_ctx = ctxopt is None
+    if custom_ctx:
+        ctxopt = {"value": ctx, "label": f"{ctx // 1024}K", "kv_default": "f16"}
+        warnings.append(f"Context {ctx} is not a verified length for {fam['name']}")
+
+    per = ctxopt.get("per_variant", {}).get(variant["quant"], {})
+    is_llama = variant["engine"] == "llama.cpp"
+    engine = fam["engines"].get(variant["engine"], {})
+
+    # KV cache (llama.cpp only)
+    kv = adv.get("kv_cache") or per.get("kv") or ctxopt.get("kv_default", "f16")
+    if kv != "f16" and not is_llama:
+        errors.append({"field": "kv_cache",
+                       "message": "KV cache type only applies to llama.cpp models"})
+    if kv not in fam.get("kv_cache", ["f16"]):
+        errors.append({"field": "kv_cache",
+                       "message": "kv_cache must be one of " + ", ".join(fam.get("kv_cache", []))})
+
+    # Chat template
+    tmpl = adv.get("template")
+    if tmpl not in (None, "builtin") and tmpl != fam.get("default_template") \
+            and tmpl not in scan_templates(fid):
+        errors.append({"field": "template", "message": f"unknown template '{tmpl}'"})
+        tmpl = None
+    tmpl_path = _resolve_template_path(fid, tmpl)
+    llama_kwargs_ok = is_llama and (tmpl_path is not None or engine.get("jinja", False))
+
+    # Reasoning effort
+    rsup = fam.get("reasoning", {}).get("supported", "unknown")
+    rev = adv.get("reasoning_effort")
+    reasoning = None
+    if rsup is False:
+        if rev not in (None, "off"):
+            errors.append({"field": "reasoning_effort",
+                           "message": "this model has no configurable reasoning effort"})
+    elif rsup is True:
+        levels = fam["reasoning"].get("levels", ["low", "medium", "high"])
+        if rev is None:
+            reasoning = fam["reasoning"].get("default")
+        elif rev == "off":
+            reasoning = None
+        elif rev in levels:
+            reasoning = rev
+        else:
+            errors.append({"field": "reasoning_effort",
+                           "message": "level must be one of " + ", ".join(levels) + " or 'off'"})
+    else:  # unknown
+        if rev in (None, "off"):
+            reasoning = None
+        elif rev in ("low", "medium", "high"):
+            reasoning = rev
+            warnings.append("Reasoning level not verified for this model")
+        else:
+            errors.append({"field": "reasoning_effort",
+                           "message": "level must be low, medium, high or 'off'"})
+
+    # Thinking toggle
+    tcap = fam.get("thinking", {}).get("toggleable", "unknown")
+    tev = adv.get("enable_thinking")
+    thinking = None
+    if tcap is False:
+        if tev is not None:
+            errors.append({"field": "enable_thinking",
+                           "message": "this model has no thinking toggle"})
+    elif tcap is True:
+        thinking = bool(tev) if tev is not None else bool(fam["thinking"].get("default", False))
+    elif tev is not None:
+        thinking = bool(tev)
+        warnings.append("Thinking toggle not verified for this model")
+    if is_llama and thinking is not None and not llama_kwargs_ok:
+        errors.append({"field": "enable_thinking",
+                       "message": "thinking needs a Jinja chat template"})
+        thinking = None
+
+    # Sampling (emitted only when the user sets a value)
+    def _num(key: str, lo: float, hi: float, lo_excl: bool = False):
+        v = adv.get(key)
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            errors.append({"field": key, "message": f"{key} must be a number"})
+            return None
+        v = float(v)
+        if (v <= lo if lo_excl else v < lo) or v > hi:
+            errors.append({"field": key,
+                           "message": f"{key} must be in {'(' if lo_excl else '['}{lo}..{hi}]"})
+            return None
+        return v
+
+    temp = _num("temp", 0.0, 2.0)
+    top_p = _num("top_p", 0.0, 1.0, lo_excl=True)
+    repeat = _num("repeat_penalty", 0.0, 2.0, lo_excl=True)
+
+    resolved = {
+        "ctx": ctx,
+        "ctx_label": ctxopt.get("label") or f"{ctx // 1024}K",
+        "custom_ctx": custom_ctx,
+        "yarn_orig": ctxopt.get("yarn_orig"),
+        "kv": None if kv == "f16" else kv,
+        "template_path": tmpl_path,
+        "llama_kwargs_ok": llama_kwargs_ok,
+        "thinking": thinking,
+        "reasoning": reasoning,
+        "temp": temp, "top_p": top_p, "repeat_penalty": repeat,
+        "vram": per.get("vram", ctxopt.get("vram")),
+    }
+    return resolved, errors, warnings
+
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────

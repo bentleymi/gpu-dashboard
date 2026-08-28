@@ -904,7 +904,7 @@ def resolve_advanced(fid: str, variant: dict, advanced: dict) -> tuple:
             errors.append({"field": key, "message": f"{key} must be a number"})
             return None
         v = float(v)
-        if (v < lo if lo_excl else v <= lo) or v > hi:
+        if (v <= lo if lo_excl else v < lo) or v > hi:
             errors.append({"field": key,
                            "message": f"{key} must be in {'(' if lo_excl else '['}{lo}..{hi}]"})
             return None
