@@ -1740,7 +1740,8 @@ def api_custom_model_create(body: dict):
             port = alloc_port()
         except RuntimeError as e:
             return JSONResponse({"error": str(e)}, status_code=500)
-        entry, _ = build_custom_entry(fid, variant, resolved, body, port)
+        # build_custom_entry returns (entry_id, entry) — id already computed above for the dup check
+        _, entry = build_custom_entry(fid, variant, resolved, body, port)
         entries = load_custom_entries(CUSTOM_MODELS_FILE)
         entries.append(entry)
         try:

@@ -2381,6 +2381,111 @@ def api_logs(model_id: str):
     return JSONResponse({"logs": text})
 
 
+def _family_payload(fid: str) -> dict:
+    fam = MODEL_FAMILIES[fid]
+    variants = [{
+        "id": v["id"], "label": v["label"], "engine": v["engine"], "quant": v["quant"],
+        "weights_gb": v.get("weights_gb"), "available": v.get("available", True),
+        "ctx_options": _ctx_for_variant(fam, v),
+        **({"description": v["description"]} if v.get("description") else {}),
+    } for v in family_variants(fid)]
+    return {
+        "id": fid,
+        "name": fam["name"],
+        "docs_url": fam.get("docs_url"),
+        "icon": fam["icon"],
+        "color": fam["color"],
+        "engines": sorted({v["engine"] for v in variants if v["available"]}),
+        "variants": variants,
+        "reasoning": fam.get("reasoning", {}),
+        "thinking": fam.get("thinking", {}),
+        "templates": ["builtin"] + scan_templates(fid),
+        "default_template": fam.get("default_template", "builtin"),
+        "kv_cache": list(fam.get("kv_cache", []))
+                    if any(v["engine"] == "llama.cpp" for v in variants) else [],
+        "sampling_defaults": SAMPLING_DEFAULTS,
+        "tags": fam.get("tags", []),
+    }
+
+
+@app.get("/api/families")
+def api_families():
+    return JSONResponse([_family_payload(fid) for fid in MODEL_FAMILIES])
+
+
+def opencode_options(resolved: dict) -> dict:
+    opts = {}
+    if resolved.get("temp") is not None:
+        opts["temperature"] = resolved["temp"]
+    if resolved.get("top_p") is not None:
+        opts["topP"] = resolved["top_p"]
+    if resolved.get("repeat_penalty") is not None:
+        opts["repetitionPenalty"] = resolved["repeat_penalty"]
+    return opts
+
+
+@app.post("/api/custom-model")
+def api_custom_model_create(body: dict):
+    fid = body.get("family")
+    if fid not in MODEL_FAMILIES:
+        return JSONResponse({"field": "family", "message": "unknown family"}, status_code=400)
+    variant = next((v for v in family_variants(fid) if v["id"] == body.get("variant")), None)
+    if variant is None:
+        return JSONResponse({"field": "variant", "message": "unknown variant"}, status_code=400)
+    if not variant.get("available", True):
+        return JSONResponse({"field": "variant", "message": "weights missing on disk"},
+                            status_code=400)
+    resolved, errors, warnings = resolve_advanced(
+        fid, variant, {** (body.get("advanced") or {}), "ctx": body.get("ctx")})
+    if errors:
+        return JSONResponse({"field": errors[0]["field"], "message": errors[0]["message"]},
+                            status_code=400)
+    entry_id = "cust_" + make_alias(fid, variant, resolved["ctx"])
+    with op_lock:
+        if entry_id in MODELS:
+            return JSONResponse({"field": "variant",
+                                 "message": f"already exists as {entry_id}"}, status_code=400)
+        try:
+            port = alloc_port()
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        # build_custom_entry returns (entry_id, entry) — id already computed above for the dup check
+        _, entry = build_custom_entry(fid, variant, resolved, body, port)
+        entries = load_custom_entries(CUSTOM_MODELS_FILE)
+        entries.append(entry)
+        try:
+            save_custom_entries(CUSTOM_MODELS_FILE, entries)   # commit point
+        except Exception as e:
+            return JSONResponse({"error": f"custom_models.json write failed: {e}"},
+                                status_code=500)
+        MODELS[entry_id] = entry
+        CUSTOM_IDS.add(entry_id)
+    warn = opencode_patch(entry["opencode"]["model_id"], port, entry["name"],
+                          resolved["ctx"], opencode_options(resolved))
+    resp = {"entry": entry, "warnings": warnings}
+    if warn:
+        resp["opencode_warning"] = warn
+    return JSONResponse(resp)
+
+
+@app.delete("/api/custom-model/{model_id}")
+def api_custom_model_delete(model_id: str):
+    model = MODELS.get(model_id)
+    if model is None or not model.get("custom"):
+        return JSONResponse({"error": "not a custom model"}, status_code=404)
+    api_stop(model_id)          # stop first, WITHOUT holding op_lock (api_stop takes it)
+    with op_lock:
+        MODELS.pop(model_id, None)
+        CUSTOM_IDS.discard(model_id)
+        entries = load_custom_entries(CUSTOM_MODELS_FILE)
+        save_custom_entries(CUSTOM_MODELS_FILE,
+                            [e for e in entries if e.get("id") != model_id])
+    oc = model.get("opencode")
+    if oc:
+        opencode_unpatch(oc.get("provider", ""), oc.get("model_id", ""))
+    return JSONResponse({"message": "Deleted"})
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return HTML_PAGE
