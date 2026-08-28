@@ -1795,6 +1795,92 @@ def resolve_advanced(fid: str, variant: dict, advanced: dict) -> tuple:
     }
     return resolved, errors, warnings
 
+
+def make_alias(fid: str, variant: dict, ctx: int) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", f"{fid}_{variant['id']}_{ctx // 1024}k").strip("_")
+
+
+def build_launch_cmd(fid: str, variant: dict, resolved: dict, port: int, alias: str) -> tuple:
+    fam = MODEL_FAMILIES[fid]
+    engine = fam["engines"][variant["engine"]]
+    if variant["engine"] == "llama.cpp":
+        cmd = [engine["bin"], "--model", variant["path"], "--alias", alias,
+               "--ctx-size", str(resolved["ctx"]),
+               "-ngl", "99", "-b", "2048", "-ub", "2048",
+               "--host", "0.0.0.0", "--port", str(port), "--threads", "16"]
+        if resolved.get("yarn_orig"):
+            cmd += ["--rope-scaling", "yarn", "--yarn-orig-ctx", str(resolved["yarn_orig"])]
+        if resolved.get("kv"):
+            cmd += ["-ctk", resolved["kv"], "-ctv", resolved["kv"]]
+        if resolved.get("template_path"):
+            cmd += ["--chat-template-file", resolved["template_path"]]
+        elif engine.get("jinja"):
+            cmd.append("--jinja")
+        if fam.get("spec_draft") and engine["bin"] == QWEN38_LLAMA:
+            cmd += ["--spec-draft-model",
+                    os.path.join(fam["base_dir"], fam["spec_draft"]),
+                    "--spec-type", "draft-mtp", "--spec-draft-ngl", "99"]
+        if resolved.get("thinking") is not None:
+            cmd += ["--chat-template-kwargs",
+                    json.dumps({"enable_thinking": bool(resolved["thinking"])})]
+        if resolved.get("reasoning"):
+            cmd += ["--reasoning-effort", resolved["reasoning"]]
+        if resolved.get("temp") is not None:
+            cmd += ["--temp", f"{resolved['temp']:g}"]
+        if resolved.get("top_p") is not None:
+            cmd += ["--top-p", f"{resolved['top_p']:g}"]
+        if resolved.get("repeat_penalty") is not None:
+            cmd += ["--repeat-penalty", f"{resolved['repeat_penalty']:g}"]
+        return cmd, {}
+    cmd = [engine["vllm"], "serve", variant["path"], "--served-model-name", alias,
+           "--host", "0.0.0.0", "--port", str(port),
+           "--max-model-len", str(resolved["ctx"]),
+           "--gpu-memory-utilization", "0.90"]
+    if engine.get("dtype"):
+        cmd += ["--dtype", engine["dtype"]]
+    cmd += list(engine.get("extra_flags") or [])
+    if resolved.get("template_path"):
+        cmd += ["--chat-template", resolved["template_path"]]
+    kwargs = {}
+    if resolved.get("thinking") is not None:
+        kwargs["enable_thinking"] = bool(resolved["thinking"])
+    if resolved.get("reasoning"):
+        kwargs["reasoning_effort"] = resolved["reasoning"]
+    if kwargs:
+        cmd += ["--default-chat-template-kwargs", json.dumps(kwargs)]
+    env = {**PYTORCH_ENV, **(engine.get("env") or {})}
+    return cmd, env
+
+
+def build_custom_entry(fid: str, variant: dict, resolved: dict, body: dict,
+                       port: int) -> tuple:
+    fam = MODEL_FAMILIES[fid]
+    alias = make_alias(fid, variant, resolved["ctx"])
+    entry_id = "cust_" + alias
+    cmd, env = build_launch_cmd(fid, variant, resolved, port, alias)
+    entry = {
+        "id": entry_id,
+        "name": f'{fam["name"]} ({variant["quant"]}, {resolved["ctx"] // 1024}K ctx)',
+        "description": (body.get("description") or "").strip()
+                       or f'{variant["label"]} \u00b7 {variant["engine"]}',
+        "port": port,
+        "cmd": cmd,
+        "cwd": fam["engines"][variant["engine"]].get("cwd", "/"),
+        "env": env,
+        "protocol": "http",
+        "category": "LLM",
+        "icon": fam["icon"],
+        "color": fam["color"],
+        "tags": (body.get("tags") or []) or list(fam.get("tags", [])),
+        "supports_offload": variant["engine"] != "llama.cpp",
+        "vram_gb": resolved.get("vram") or variant.get("weights_gb"),
+        "quant": variant["quant"],
+        "custom": True,
+        "custom_ref": {"family": fid, "variant": variant["id"], "ctx": resolved["ctx"]},
+        "opencode": {"provider": f"{alias}-{port}", "model_id": alias},
+    }
+    return entry_id, entry
+
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────

@@ -1021,7 +1021,7 @@ def test_llama_yarn_kv_jinja_sampling():
     assert cmd[:2] == [d.IK_LLAMA, "--model"]
     i = cmd.index("--rope-scaling")
     assert cmd[i:i + 4] == ["--rope-scaling", "yarn", "--yarn-orig-ctx", "262144"]
-    assert cmd[i + 4:i + 7] == ["-ctk", "q8_0", "-ctv", "q8_0"]
+    assert cmd[i + 4:i + 8] == ["-ctk", "q8_0", "-ctv", "q8_0"]
     assert "--jinja" in cmd                        # no template dir, engine jinja=True
     assert "--chat-template-file" not in cmd
     assert cmd[-4:] == ["--temp", "0.7", "--top-p", "0.9"]
