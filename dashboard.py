@@ -2242,10 +2242,17 @@ def api_status():
             "token_usage": usage,
             "quant": get_quant(model),
             "vram_gb": model.get("vram_gb"),
+            "custom": model.get("custom", False),
             **get_model_status(model_id),
         }
     return JSONResponse(result)
 
+
+def is_vllm_cmd(cmd: list) -> bool:
+    """True for vllm CLI form and module form (python -m vllm...)."""
+    if not cmd:
+        return False
+    return cmd[0].endswith("vllm") or (len(cmd) > 2 and cmd[1] == "-m" and "vllm" in cmd[2])
 
 @app.post("/api/start/{model_id}")
 def api_start(model_id: str, offload: bool = False):
@@ -2270,7 +2277,7 @@ def api_start(model_id: str, offload: bool = False):
 
         if offload and model.get("supports_offload"):
             # vLLM models: add --cpu-offload-gb flag
-            if cmd[0].endswith("vllm"):
+            if is_vllm_cmd(cmd):
                 cmd.extend(["--cpu-offload-gb", "24"])
             else:
                 # Gradio/other apps: set env var for the app to check
