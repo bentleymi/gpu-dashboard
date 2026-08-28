@@ -2850,6 +2850,33 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .footer {
     text-align: center; padding: 24px; color: #3f3f46; font-size: 0.75em;
   }
+  .builder { background: #1a1b23; border: 1px solid #27272a; border-radius: 8px; margin: 0 0 10px; overflow: hidden; }
+  .builder-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; cursor: pointer; user-select: none; }
+  .builder-head:hover { background: #1f2028; }
+  .builder-title { font-weight: 700; font-size: 0.9em; }
+  .builder-chev { color: #52525b; }
+  .builder-body { padding: 4px 14px 14px; }
+  .builder-body.collapsed { display: none; }
+  .builder-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+  .builder-row.right { justify-content: flex-end; }
+  .builder-row label { display: flex; align-items: center; gap: 6px; color: #a1a1aa; font-size: 0.82em; }
+  .builder-row .grow { flex: 1 1 260px; }
+  .builder-row .grow input { width: 100%; }
+  .builder-row input[type=number], .builder-row select { background: #111218; color: #e4e4e7; border: 1px solid #27272a; border-radius: 6px; padding: 5px 8px; font-size: 0.85em; }
+  .builder-row input[type=number] { width: 110px; }
+  .builder-adv-head { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: #a1a1aa; font-size: 0.82em; cursor: pointer; }
+  .builder-adv { background: #14151b; border: 1px solid #27272a; border-radius: 6px; padding: 0 10px 4px; margin-top: 4px; }
+  .builder-adv.collapsed { display: none; }
+  .builder-note { color: #eab308; font-size: 0.75em; }
+  .builder-warn { margin-top: 10px; }
+  .builder-warn div { color: #eab308; font-size: 0.78em; padding: 2px 0; }
+  .builder-error { color: #f87171; font-size: 0.78em; margin-top: 8px; min-height: 1em; }
+  .builder-save { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-size: 0.85em; font-weight: 600; cursor: pointer; }
+  .builder-save:hover { background: #1d4ed8; }
+  .custom-badge { display: inline-block; background: #2563eb22; color: #60a5fa; border-radius: 4px; font-size: 0.7em; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+  .del-btn { cursor: pointer; color: #52525b; margin-left: 6px; font-size: 0.8em; vertical-align: middle; }
+  .del-btn:hover { color: #f87171; }
+  .builder-toast { position: fixed; bottom: 20px; right: 20px; background: #14532d; color: #bbf7d0; border: 1px solid #166534; padding: 10px 16px; border-radius: 8px; font-size: 0.85em; z-index: 99; }
 </style>
 </head>
 <body>
@@ -2958,6 +2985,47 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<div class="builder" id="builder">
+  <div class="builder-head" onclick="toggleBuilder()">
+    <span class="builder-title">+ New Model Config</span>
+    <span class="builder-chev" id="builder-chev">&#9656;</span>
+  </div>
+  <div class="builder-body collapsed" id="builder-body">
+    <div class="builder-row">
+      <label>Model family
+        <select id="b-family" onchange="onFamilyChange()"></select>
+        <a id="b-docs" target="_blank" rel="noopener" hidden>docs &#8599;</a>
+      </label>
+      <label>Quant <select id="b-variant" onchange="onVariantChange()"></select></label>
+      <label>Context <select id="b-ctx" onchange="onCtxChange()"></select></label>
+      <input type="number" id="b-ctx-custom" min="4096" max="4194304" step="1024" placeholder="tokens" hidden>
+    </div>
+    <div class="builder-row">
+      <label class="grow">Description <input type="text" id="b-desc" placeholder="(auto-generated if blank)"></label>
+      <label class="grow">Tags <input type="text" id="b-tags" placeholder="comma, separated"></label>
+    </div>
+    <label class="builder-adv-head"><input type="checkbox" id="b-adv" onchange="advToggle()"> Advanced</label>
+    <div class="builder-adv collapsed" id="b-adv-body">
+      <div class="builder-row">
+        <label>Temp <input type="number" id="b-temp" step="0.05" min="0" max="2" placeholder=""></label>
+        <label>Top P <input type="number" id="b-topp" step="0.01" min="0.01" max="1" placeholder=""></label>
+        <label>Repeat penalty <input type="number" id="b-repp" step="0.01" min="0.01" max="2" placeholder=""></label>
+        <span class="builder-note" id="b-sampling-note" hidden>applied via your opencode client, not the server</span>
+      </div>
+      <div class="builder-row">
+        <label>Reasoning effort <select id="b-reason"></select></label>
+        <label>Thinking <input type="checkbox" id="b-think"></label>
+        <label>Chat template <select id="b-template"></select></label>
+        <label>KV cache <select id="b-kv"></select></label>
+      </div>
+    </div>
+    <div id="b-warn" class="builder-warn"></div>
+    <div id="b-error" class="builder-error"></div>
+    <div class="builder-row right">
+      <button class="builder-save" onclick="saveCustomModel()">Save as custom config</button>
+    </div>
+  </div>
+</div>
 <div class="table-bar">
   <input type="search" class="search-input" id="search" placeholder="Search models, tags, ports, quant…">
   <span class="table-count" id="table-count"></span>
@@ -3082,7 +3150,7 @@ function buildRow(id, m) {
   tr.className = 'model-row';
   const initial = (m.name || '?').trim().charAt(0);
   tr.innerHTML = `
-    <td class="td-name"><span class="row-icon" style="background:${m.color}18;color:${m.color}">${initial}</span><a class="name-link" id="link-${id}" target="_blank" rel="noopener">${m.name}</a></td>
+    <td class="td-name"><span class="row-icon" style="background:${m.color}18;color:${m.color}">${initial}</span><a class="name-link" id="link-${id}" target="_blank" rel="noopener">${m.name}</a>${m.custom ? `<span class="custom-badge">custom</span><span class="del-btn" title="delete custom config" onclick="event.stopPropagation();delCustom('${id}')">&#10005;</span>` : ""}</td>
     <td class="mono">${m.quant || '—'}</td>
     <td class="mono">${m.vram_gb ? '~' + m.vram_gb + ' GB' : '—'}</td>
     <td class="mono">${m.port}</td>
@@ -3429,6 +3497,192 @@ async function refreshGpu() {
     document.getElementById('gpu-power-bar').style.width = (g.power / g.power_limit * 100) + '%';
     updateCost();
   } catch(e) {}
+}
+
+// ── Model Config Builder ──
+let FAMILY_CACHE = null;
+let CUR_FAM = null;
+
+function toggleBuilder() {
+  const body = document.getElementById('builder-body');
+  const open = body.classList.contains('collapsed');
+  body.classList.toggle('collapsed', !open);
+  document.getElementById('builder-chev').textContent = open ? '\u25be' : '\u25b8';
+  if (open && !FAMILY_CACHE) loadFamilies();
+}
+
+async function loadFamilies() {
+  const r = await fetch('/api/families');
+  FAMILY_CACHE = await r.json();
+  document.getElementById('b-family').innerHTML =
+    FAMILY_CACHE.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
+  onFamilyChange();
+}
+
+function onFamilyChange() {
+  const f = FAMILY_CACHE.find(x => x.id === document.getElementById('b-family').value);
+  CUR_FAM = f;
+  const docs = document.getElementById('b-docs');
+  if (f.docs_url) { docs.href = f.docs_url; docs.hidden = false; } else { docs.hidden = true; }
+  document.getElementById('b-variant').innerHTML = f.variants.map(
+    v => `<option value="${v.id}"${v.available ? '' : ' disabled'}>${v.label}${v.available ? '' : ' (weights missing)'}</option>`
+  ).join('');
+  document.getElementById('b-tags').placeholder = (f.tags || []).join(', ');
+  onVariantChange();
+}
+
+function curVariant() {
+  if (!CUR_FAM) return null;
+  return CUR_FAM.variants.find(v => v.id === document.getElementById('b-variant').value) || null;
+}
+
+function onVariantChange() {
+  const v = curVariant();
+  if (!v) return;
+  const isLlama = v.engine === 'llama.cpp';
+  document.getElementById('b-ctx').innerHTML = (v.ctx_options || []).map(
+    c => `<option value="${c.value}">${c.label}</option>`
+  ).join('') + '<option value="custom">Custom\u2026</option>';
+  const sd = (CUR_FAM.sampling_defaults || {})[v.engine] || {};
+  document.getElementById('b-temp').placeholder = (sd.temp != null) ? String(sd.temp) : '';
+  document.getElementById('b-topp').placeholder = (sd.top_p != null) ? String(sd.top_p) : '';
+  document.getElementById('b-repp').placeholder = (sd.repeat_penalty != null) ? String(sd.repeat_penalty) : '';
+  document.getElementById('b-sampling-note').hidden = !String(v.engine).startsWith('vllm');
+  const kSel = document.getElementById('b-kv');
+  kSel.hidden = !isLlama;
+  kSel.innerHTML = (isLlama ? (CUR_FAM.kv_cache || ['f16']) : ['f16'])
+    .map(k => `<option value="${k}">${k}</option>`).join('');
+  kSel.value = 'f16';
+  // template options: the family default (file or 'builtin') first, labelled "default",
+  // then every other on-disk .jinja file (basenames)
+  const tSel = document.getElementById('b-template');
+  const tOpts = [];
+  if (CUR_FAM.default_template !== 'builtin') {
+    tOpts.push(`<option value="${CUR_FAM.default_template}">default (${CUR_FAM.default_template.split('/').pop()})</option>`);
+  }
+  tOpts.push(`<option value="builtin">${CUR_FAM.default_template !== 'builtin' ? 'engine template (builtin)' : 'default (engine template)'}</option>`);
+  for (const t of CUR_FAM.templates) {
+    if (t === 'builtin' || t === CUR_FAM.default_template) continue;
+    tOpts.push(`<option value="${t}">${t.split('/').pop()}</option>`);
+  }
+  tSel.innerHTML = tOpts.join('');
+  const rs = CUR_FAM.reasoning || {};
+  const rSel = document.getElementById('b-reason');
+  if (rs.supported === false) { rSel.hidden = true; rSel.innerHTML = ''; }
+  else {
+    rSel.hidden = false;
+    const levels = rs.supported === true ? (rs.levels || ['low', 'medium', 'high']) : ['low', 'medium', 'high'];
+    let opts = '';
+    if (rs.supported === true) opts += `<option value="">default (${rs.default || 'engine'})</option>`;
+    opts += levels.map(l => `<option value="${l}">${l}</option>`).join('')
+      + '<option value="off">off (no flag)</option>';
+    rSel.innerHTML = opts;
+  }
+  const tc = CUR_FAM.thinking || {};
+  const th = document.getElementById('b-think');
+  th.disabled = tc.toggleable === false;
+  th.checked = tc.default === true;
+  onCtxChange();
+}
+
+function onCtxChange() { renderWarn(); }
+
+function renderWarn() {
+  const el = document.getElementById('b-warn');
+  const v = curVariant();
+  if (!v || !CUR_FAM) { el.innerHTML = ''; return; }
+  const warns = [];
+  const selVal = document.getElementById('b-ctx').value;
+  const custom = (selVal === 'custom');
+  document.getElementById('b-ctx-custom').hidden = !custom;
+  if (custom) {
+    warns.push('Context length is not a verified length for this model.');
+  } else {
+    const c = (v.ctx_options || []).find(x => String(x.value) === selVal);
+    if (c && c.note) warns.push(c.note);
+  }
+  const rs = CUR_FAM.reasoning || {};
+  const rv = document.getElementById('b-reason').value;
+  if (rs.supported === 'unknown' && rv && rv !== 'off')
+    warns.push('Reasoning level not verified for this model.');
+  const tc = CUR_FAM.thinking || {};
+  if (tc.toggleable === 'unknown' && document.getElementById('b-think').checked)
+    warns.push('Thinking toggle not verified for this model.');
+  el.innerHTML = warns.map(w => `<div>\u26a0 ${w}</div>`).join('');
+}
+
+function advToggle() {
+  document.getElementById('b-adv-body').classList.toggle(
+    'collapsed', !document.getElementById('b-adv').checked);
+}
+
+async function saveCustomModel() {
+  const errEl = document.getElementById('b-error');
+  errEl.textContent = '';
+  const v = curVariant();
+  if (!v || !v.available) { errEl.textContent = 'Pick a model family and an available quant.'; return; }
+  const selVal = document.getElementById('b-ctx').value;
+  const ctx = (selVal === 'custom')
+    ? parseInt(document.getElementById('b-ctx-custom').value, 10)
+    : parseInt(selVal, 10);
+  if (!ctx || ctx < 4096 || ctx > 4194304) {
+    errEl.textContent = 'Enter a valid context length (4096\u20134194304) for "Custom\u2026".';
+    return;
+  }
+  const num = id => {
+    const x = document.getElementById(id).value.trim();
+    return x === '' ? null : parseFloat(x);
+  };
+  const tc = CUR_FAM.thinking || {};
+  const th = document.getElementById('b-think');
+  const rSel = document.getElementById('b-reason');
+  const kSel = document.getElementById('b-kv');
+  const tSel = document.getElementById('b-template');
+  const body = {
+    family: CUR_FAM.id,
+    variant: v.id,
+    ctx,
+    description: document.getElementById('b-desc').value.trim(),
+    tags: document.getElementById('b-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+    advanced: {
+      temp: num('b-temp'),
+      top_p: num('b-topp'),
+      repeat_penalty: num('b-repp'),
+      reasoning_effort: (rSel.hidden || rSel.value === '') ? null : rSel.value,
+      enable_thinking: tc.toggleable === false ? null
+        : (tc.toggleable === true ? th.checked : (th.checked ? true : null)),
+      template: (tSel.hidden || tSel.value === 'builtin') ? null : tSel.value,
+      kv_cache: (kSel.hidden || kSel.value === 'f16') ? null : kSel.value,
+    },
+  };
+  const r = await fetch('/api/custom-model', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status !== 200) { errEl.textContent = j.message || JSON.stringify(j); return; }
+  document.getElementById('b-desc').value = '';
+  toast('Saved \u2014 ' + j.entry.name
+    + (j.opencode_warning ? ' \u00b7 \u26a0 ' + j.opencode_warning : ''), !!j.opencode_warning);
+  refresh();
+}
+
+function toast(msg, warn) {
+  const t = document.createElement('div');
+  t.className = 'builder-toast';
+  if (warn) { t.style.background = '#422006'; t.style.color = '#fde68a'; t.style.borderColor = '#713f12'; }
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+async function delCustom(id) {
+  const name = (currentModels && currentModels[id]) ? currentModels[id].name : id;
+  if (!confirm(`Delete \u2018${name}\u2019? Removes the config and its opencode entry; stops it if running.`)) return;
+  const r = await fetch('/api/custom-model/' + id, { method: 'DELETE' });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) { toast('Deleted ' + name); refresh(); }
+  else { toast('Delete failed: ' + (j.error || r.status), true); }
 }
 
 refresh();
