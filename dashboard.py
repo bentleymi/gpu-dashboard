@@ -1881,6 +1881,60 @@ def build_custom_entry(fid: str, variant: dict, resolved: dict, body: dict,
     }
     return entry_id, entry
 
+
+CUSTOM_IDS: set = set()
+
+
+def load_custom_entries(path: str) -> list:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        assert isinstance(data, list)
+        return data
+    except Exception as e:
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        try:
+            os.replace(path, path + f".corrupt-{ts}")
+        except OSError:
+            pass
+        print(f"[builder] {path} unreadable ({e}); continuing with built-ins only",
+              file=sys.stderr)
+        return []
+
+
+def save_custom_entries(path: str, entries: list) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(entries, f, indent=2)
+    os.replace(tmp, path)
+
+
+def merge_custom_at_startup() -> None:
+    for entry in load_custom_entries(CUSTOM_MODELS_FILE):
+        mid = entry.get("id")
+        if not mid:
+            continue
+        if mid in MODELS and mid not in CUSTOM_IDS:
+            print(f"[builder] custom {mid} collides with existing entry; skipped",
+                  file=sys.stderr)
+            continue
+        MODELS[mid] = entry
+        CUSTOM_IDS.add(mid)
+
+
+def alloc_port() -> int:
+    # is_port_open() is defined further down in dashboard.py — fine, called at runtime
+    busy = {m["port"] for m in MODELS.values()}
+    for port in range(8100, 8200):
+        if port not in busy and not is_port_open(port):
+            return port
+    raise RuntimeError("no free ports in 8100-8199")
+
+
+merge_custom_at_startup()
+
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────
