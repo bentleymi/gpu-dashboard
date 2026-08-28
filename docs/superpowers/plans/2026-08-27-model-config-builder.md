@@ -548,7 +548,7 @@ MODEL_FAMILIES = {
 
 ```python
 QUANT_TOKENS = ["Q8_K_XL", "Q8_K_P", "Q6_K_XL", "Q6_K_P", "IQ3_KS", "IQ4_XS", "NVFP4",
-                "Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "Q4_0", "BF16", "FP16"]
+                "Q8_0", "Q6_K", "Q5_K_M", "Q4_K_XL", "Q4_K_M", "Q4_0", "BF16", "FP16"]
 
 
 def parse_quant(filename: str) -> str:

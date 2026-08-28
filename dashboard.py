@@ -1318,6 +1318,334 @@ processes: dict[str, subprocess.Popen] = {}
 log_files: dict[str, object] = {}
 op_lock = threading.Lock()
 
+# ── Model Config Builder ─────────────────────────────────────────
+import json
+import shutil
+import sys
+import datetime
+
+CUSTOM_MODELS_FILE = os.environ.get(
+    "DASHBOARD_CUSTOM_MODELS", "/mnt/raid1_nvme/JanusPro7b/custom_models.json")
+OPENCODE_CONFIG = os.environ.get(
+    "OPENCODE_CONFIG_PATH", "/root/.config/opencode/config.json")
+
+IK_LLAMA = "/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server"
+QWEN38_LLAMA = "/mnt/raid1_nvme/Qwen3_8-27B/llama.cpp/build/bin/llama-server"
+VLLM_MAIN = "/mnt/raid1_nvme/Qwen3_8-27B/venv/bin/vllm"
+VLLM_LEGACY = "/mnt/raid1_sata/vllm-env/bin/vllm"
+NVFP4_36 = "/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4/venv/bin/vllm"
+NVFP4_38 = "/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4/venv/bin/vllm"
+PR27742_LLAMA = "/mnt/raid1_nvme/models/llama.cpp-pr27742/build/bin/llama-server"
+FLASH_ENV = {"FLASHINFER_DISABLE_VERSION_CHECK": "1"}
+PYTORCH_ENV = {"PYTORCH_ALLOC_CONF": "expandable_segments:True"}
+IK_CWD = "/mnt/raid1_nvme/models/ik_llama.cpp"
+
+
+def _fam(name, icon, color, tags, **kw):
+    e = {"name": name, "icon": icon, "color": color, "tags": tags,
+         "sources": [], "ctx_options": [], "docs_url": None, "scan_exclude": [],
+         "spec_draft": None, "templates": [], "default_template": "builtin",
+         "kv_cache": ["f16", "q8_0", "q4_0"],
+         "reasoning": {"supported": "unknown"}, "thinking": {"toggleable": "unknown"}}
+    e.update(kw)
+    return e
+
+
+def _llama(bin_=IK_LLAMA, cwd=IK_CWD, jinja=True):
+    return {"bin": bin_, "cwd": cwd, "jinja": jinja}
+
+
+def _vllm(binp, cwd, **kw):
+    return {"vllm": binp, "cwd": cwd, **kw}
+
+
+MODEL_FAMILIES = {
+    "qwen38-27b": _fam(
+        "Qwen3.8 27B", "sparkles", "#f97316", ["text-to-text", "text-to-code"],
+        base_dir="/mnt/raid1_nvme/Qwen3_8-27B", scan_engine="llama.cpp",
+        scan_exclude=["gguf-q8/mtp"],
+        spec_draft="gguf-q8/mtp/MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+        engines={
+            "llama.cpp": _llama(QWEN38_LLAMA, "/mnt/raid1_nvme/Qwen3_8-27B", jinja=False),
+            "vllm": _vllm(VLLM_MAIN, "/mnt/raid1_nvme/Qwen3_8-27B", dtype="half"),
+            "vllm-nvfp4": _vllm(NVFP4_38, "/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4",
+                                env=dict(FLASH_ENV)),
+        },
+        sources=[
+            {"id": "fp16", "kind": "dir", "path": "/mnt/raid1_nvme/Qwen3_8-27B/fp16",
+             "quant": "FP16", "engine": "vllm"},
+            {"id": "uncensored", "kind": "dir",
+             "path": "/mnt/raid1_nvme/Qwen3_8-27B/uncensored",
+             "quant": "FP16", "engine": "vllm",
+             "description": "orcarouter abliterated finetune"},
+            {"id": "nvfp4", "kind": "hf", "path": "unsloth/Qwen3.8-27B-NVFP4",
+             "quant": "NVFP4", "weights_gb": 16, "engine": "vllm-nvfp4"},
+        ],
+        ctx_options=[{"value": 262144, "label": "256K (native)", "kv_default": "f16",
+                      "per_variant": {"Q8_K_XL": {"vram": 46}, "Q6_K_XL": {"vram": 40}}}],
+        reasoning={"supported": True, "levels": ["low", "medium", "high"],
+                   "default": "medium"},
+        thinking={"toggleable": True, "default": True},
+        templates=["templates"],
+        default_template="templates/sharp-chat-template-v22.1.1.jinja"),
+    "qwen3-coder-next": _fam(
+        "Qwen3-Coder-Next", "code-2", "#10b981",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/qwen3-coder-next", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 131072, "label": "131K (native)", "kv_default": "f16"}],
+        reasoning={"supported": False}, thinking={"toggleable": False}),
+    "qwen36-35b-uncensored": _fam(
+        "Qwen3.6 35B Uncensored", "zap", "#f97316",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/qwen36-35b-uncensored", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[
+            {"value": 262144, "label": "256K (native)", "kv_default": "f16"},
+            {"value": 524288, "label": "512K (YaRN)", "yarn_orig": 262144,
+             "kv_default": "f16", "note": "YaRN-extended; quality may degrade past native"},
+            {"value": 1048576, "label": "1M (YaRN, q8 KV)", "yarn_orig": 262144,
+             "kv_default": "q8_0", "vram": 84,
+             "note": "YaRN-extended; needs most of VRAM"}],
+        thinking={"toggleable": True, "default": False}),
+    "davidau-40b": _fam(
+        "Qwen3.6-40B Deck Opus", "brain", "#818cf8",
+        ["text-to-text", "text-to-code", "agents", "claude"],
+        base_dir="/mnt/raid1_nvme/models/davidau-qwen3.6-40b", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[
+            {"value": 262144, "label": "256K (native)", "kv_default": "f16"},
+            {"value": 393216, "label": "384K (YaRN, q4 KV)", "yarn_orig": 262144,
+             "kv_default": "q4_0", "per_variant": {"Q8_0": {"vram": 81}},
+             "note": "YaRN-extended"},
+            {"value": 524288, "label": "512K (YaRN)", "yarn_orig": 262144,
+             "kv_default": "q8_0",
+             "per_variant": {"Q6_K": {"kv": "q4_0", "vram": 83},
+                             "Q8_0": {"kv": "q8_0", "vram": 96}},
+             "note": "YaRN-extended; needs the GPU to itself"},
+            {"value": 1048576, "label": "1M (YaRN, q8 KV)", "yarn_orig": 262144,
+             "kv_default": "q8_0", "per_variant": {"Q8_0": {"vram": 96}},
+             "note": "YaRN-extended; needs the GPU to itself"}],
+        thinking={"toggleable": False}),
+    "qwen35-122b": _fam(
+        "Qwen3.5 122B-A10B", "brain", "#22d3ee",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/qwen35-122b", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 262144, "label": "256K (native)", "kv_default": "f16"}]),
+    "minimax-m25": _fam(
+        "MiniMax M2.5", "rocket", "#06b6d4",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/minimax-m2.5", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 65536, "label": "64K (native)", "kv_default": "f16"}]),
+    "qwen36-27b-fable-fusion": _fam(
+        "Fable Fusion 711", "brain-circuit", "#a855f7",
+        ["text-to-text", "vision", "heretic", "mtp"],
+        base_dir="/mnt/raid1_nvme/models/qwen36-27b-fable-fusion", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[
+            {"value": 262144, "label": "256K (native)", "kv_default": "f16",
+             "per_variant": {"Q8_0": {"vram": 32}, "Q6_K": {"vram": 24}}},
+            {"value": 1048576, "label": "1M (YaRN, q8 KV)", "yarn_orig": 262144,
+             "kv_default": "q8_0", "per_variant": {"Q8_0": {"vram": 96}},
+             "note": "YaRN-extended; needs most of VRAM"}]),
+    "qwen36-27b-fable-amd": _fam(
+        "Fable Fusion (AMD)", "cpu", "#f97316",
+        ["text-to-text", "vision", "iq4_xs", "amd"],
+        base_dir="/mnt/raid1_nvme/models/qwen36-27b-fable-amd", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 262144, "label": "256K (native)", "kv_default": "f16",
+                      "vram": 18}],
+        reasoning={"supported": False}, thinking={"toggleable": False}),
+    "ornith-35b": _fam(
+        "Ornith 1.0 35B", "brain", "#f59e0b", ["llm", "gguf"],
+        base_dir="/mnt/raid1_nvme/models/Ornith-1.0-35B", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()}, ctx_options=[]),
+    "laguna-s21": _fam(
+        "Laguna S-2.1", "brain", "#7c3aed", ["llm", "gguf", "1m-context"],
+        base_dir="/mnt/raid1_nvme/models/Laguna-S-2.1", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 1048576, "label": "1M (native)", "kv_default": "f16",
+                      "per_variant": {"Q8_0": {"vram": 96}, "Q4_K_M": {"vram": 96}}}]),
+    "qwen38-flash-next": _fam(
+        "Qwen3.8-Flash-Next 125B", "brain-circuit", "#06b6d4",
+        ["text-to-text", "vision", "moe", "125b", "qwen4exp"],
+        base_dir="/mnt/raid1_nvme/models/qwen38-flash-next", scan_engine="llama.cpp",
+        # 125B MoE multimodal (Qwen4Exp arch) — only the PR 27742 build loads it;
+        # vram from the user's builtin entries (88G/104G on disk + 262K ctx overhead)
+        engines={"llama.cpp": _llama(PR27742_LLAMA,
+                                     "/mnt/raid1_nvme/models/llama.cpp-pr27742")},
+        ctx_options=[{"value": 262144, "label": "262K (native)", "kv_default": "f16",
+                      "per_variant": {"IQ4_XS": {"vram": 94}, "Q4_K_XL": {"vram": 111}}}]),
+    "qwen36-27b": _fam(
+        "Qwen3.6 27B", "zap", "#f59e0b", ["text-to-text", "text-to-code"],
+        engines={
+            "vllm": _vllm(VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers",
+                          extra_flags=["--trust-remote-code"]),
+            "vllm-nvfp4": _vllm(NVFP4_36, "/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4",
+                                extra_flags=["--trust-remote-code"], env=dict(FLASH_ENV)),
+        },
+        sources=[
+            {"id": "bf16", "kind": "dir", "path": "/mnt/raid1_nvme/models/qwen36-27b",
+             "quant": "BF16", "engine": "vllm",
+             "ctx_options": [{"value": 131072, "label": "131K (native)",
+                              "kv_default": "f16"}]},
+            {"id": "nvfp4", "kind": "hf", "path": "unsloth/Qwen3.6-27B-NVFP4",
+             "quant": "NVFP4", "weights_gb": 16, "engine": "vllm-nvfp4",
+             "ctx_options": [{"value": 262144, "label": "256K (native)",
+                              "kv_default": "f16", "vram": 20}]},
+        ]),
+    "qwen36-35b": _fam(
+        "Qwen3.6 35B-A3B", "zap", "#38bdf8", ["text-to-text", "text-to-code"],
+        engines={"vllm": _vllm(VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers",
+                               extra_flags=["--trust-remote-code", "--enforce-eager"])},
+        sources=[
+            {"id": "bf16", "kind": "dir", "path": "/mnt/raid1_nvme/models/qwen36-35b",
+             "quant": "BF16", "engine": "vllm",
+             "ctx_options": [{"value": 131072, "label": "131K (native)",
+                              "kv_default": "f16"}]},
+        ]),
+    "qwen25-72b": _fam("Qwen 2.5 72B", "brain", "#818cf8", ["text-to-text"],
+                       engines={"vllm": _vllm(VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers")},
+                       sources=[{"id": "hf", "kind": "hf",
+                                 "path": "Qwen/Qwen2.5-72B-Instruct", "quant": "BF16",
+                                 "engine": "vllm",
+                                 "ctx_options": [{"value": 32768, "label": "32K",
+                                                  "kv_default": "f16"}]}]),
+    "qwen25-coder-32b": _fam("Qwen 2.5 Coder 32B", "code", "#a78bfa", ["text-to-code"],
+                             engines={"vllm": _vllm(VLLM_LEGACY,
+                                                    "/mnt/raid1_nvme/vllm-servers")},
+                             sources=[{"id": "hf", "kind": "hf",
+                                       "path": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                                       "quant": "BF16", "engine": "vllm",
+                                       "ctx_options": [{"value": 32768, "label": "32K",
+                                                        "kv_default": "f16"}]}]),
+    "llama33-70b": _fam("Llama 3.3 70B", "cpu", "#c084fc", ["text-to-text"],
+                        engines={"vllm": _vllm(VLLM_LEGACY,
+                                               "/mnt/raid1_nvme/vllm-servers")},
+                        sources=[{"id": "hf", "kind": "hf",
+                                  "path": "meta-llama/Llama-3.3-70B-Instruct",
+                                  "quant": "BF16", "engine": "vllm",
+                                  "ctx_options": [{"value": 32768, "label": "32K",
+                                                   "kv_default": "f16"}]}]),
+    "deepseek-r1-32b": _fam("DeepSeek R1 32B", "zap", "#e879f9",
+                            ["text-to-text", "reasoning"],
+                            engines={"vllm": _vllm(VLLM_LEGACY,
+                                                   "/mnt/raid1_nvme/vllm-servers")},
+                            sources=[{"id": "hf", "kind": "hf",
+                                      "path": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+                                      "quant": "BF16", "engine": "vllm",
+                                      "ctx_options": [{"value": 65536, "label": "64K",
+                                                       "kv_default": "f16"}]}]),
+    "deepseek-r1-70b": _fam("DeepSeek R1 70B", "flame", "#f472b6",
+                            ["text-to-text", "reasoning"],
+                            engines={"vllm": _vllm(VLLM_LEGACY,
+                                                   "/mnt/raid1_nvme/vllm-servers")},
+                            sources=[{"id": "hf", "kind": "hf",
+                                      "path": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+                                      "quant": "BF16", "engine": "vllm",
+                                      "ctx_options": [{"value": 32768, "label": "32K",
+                                                       "kv_default": "f16"}]}]),
+    "qwen35-27b-opus-reasoning": _fam("Qwen3.5 27B Opus Reasoning", "brain-circuit",
+                                      "#a855f7", ["text-to-text", "reasoning"],
+                                      engines={"vllm": _vllm(
+                                          VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers")},
+                                      sources=[{"id": "hf", "kind": "hf",
+                                                "path": "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+                                                "quant": "BF16", "engine": "vllm",
+                                                "ctx_options": [
+                                                    {"value": 32768, "label": "32K",
+                                                     "kv_default": "f16"}]}]),
+}
+
+QUANT_TOKENS = ["Q8_K_XL", "Q8_K_P", "Q6_K_XL", "Q6_K_P", "IQ3_KS", "IQ4_XS", "NVFP4",
+                "Q8_0", "Q6_K", "Q5_K_M", "Q4_K_XL", "Q4_K_M", "Q4_0", "BF16", "FP16"]
+
+
+def parse_quant(filename: str) -> str:
+    up = filename.upper()
+    for tok in QUANT_TOKENS:
+        if tok in up:
+            return tok
+    return "GGUF"
+
+
+def _scan_gguf_variants_in(root: str, engine_name: str, exclude: list) -> list:
+    """Group *.gguf files under root by quant token; shards → one variant."""
+    groups: dict = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        rel = os.path.relpath(dirpath, root).replace("\\", "/")
+        if any(ex.rstrip("/") + "/" in rel + "/" for ex in exclude):
+            continue
+        for fn in filenames:
+            if fn.lower().endswith(".gguf"):
+                groups.setdefault((rel, parse_quant(fn)), []).append(
+                    os.path.join(dirpath, fn))
+    out = []
+    for (_rel, q), paths in groups.items():
+        paths.sort()
+        first = next((p for p in paths if "-00001-of-" in os.path.basename(p)), paths[0])
+        size = sum(os.path.getsize(p) for p in paths)
+        gb = size / 1e9
+        out.append({
+            "id": f"gguf_{q.lower()}", "quant": q, "path": first,
+            "weights_gb": round(size / 1e9, 1), "engine": engine_name, "kind": "gguf",
+            "available": True,
+            "label": f"{q} · ~{gb:.0f} GB" + (" · shards" if len(paths) > 1 else ""),
+            "ctx_options": None,
+        })
+    return sorted(out, key=lambda v: v["quant"])
+
+
+def scan_gguf_variants(fid: str) -> list:
+    fam = MODEL_FAMILIES[fid]
+    eng_key = fam.get("scan_engine")
+    if not eng_key or not fam.get("base_dir"):
+        return []
+    return _scan_gguf_variants_in(fam["base_dir"], eng_key, fam.get("scan_exclude", []))
+
+
+def scan_sources(fid: str) -> list:
+    out = []
+    for s in MODEL_FAMILIES[fid].get("sources", []):
+        v = dict(s)
+        if s["kind"] == "dir":
+            try:
+                sts = [f for f in os.listdir(s["path"]) if f.endswith(".safetensors")]
+            except OSError:
+                sts = []
+            v["available"] = bool(sts)
+            if not v.get("weights_gb") and sts:
+                v["weights_gb"] = round(
+                    sum(os.path.getsize(os.path.join(s["path"], f)) for f in sts) / 1e9, 1)
+            gb = v.get("weights_gb")
+            v["label"] = (f'{s["quant"]} · ~{gb:.0f} GB' if gb else f'{s["quant"]} · vLLM dir')
+        else:
+            v["available"] = True
+            gb = s.get("weights_gb")
+            v["label"] = f'{s["quant"]} · HF' + (f" · ~{gb:.0f} GB" if gb else "")
+        v["ctx_options"] = s.get("ctx_options")
+        out.append(v)
+    return out
+
+
+def family_variants(fid: str) -> list:
+    return scan_gguf_variants(fid) + scan_sources(fid)
+
+
+def scan_templates(fid: str) -> list:
+    fam = MODEL_FAMILIES[fid]
+    found: list = []
+    for tdir in fam.get("templates", []):
+        try:
+            for n in sorted(os.listdir(os.path.join(fam["base_dir"], tdir))):
+                if n.endswith(".jinja") and "broken" not in n and n not in found:
+                    found.append(n)
+        except OSError:
+            continue
+    return found
+
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────
