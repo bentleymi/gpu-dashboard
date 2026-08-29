@@ -2850,7 +2850,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .footer {
     text-align: center; padding: 24px; color: #3f3f46; font-size: 0.75em;
   }
-  .builder { background: #1a1b23; border: 1px solid #27272a; border-radius: 8px; margin: 0 0 10px; overflow: hidden; }
+  .builder { background: #1a1b23; border: 1px solid #27272a; border-radius: 8px; max-width: 1160px; margin: 24px auto 12px; overflow: hidden; }
   .builder-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; cursor: pointer; user-select: none; }
   .builder-head:hover { background: #1f2028; }
   .builder-title { font-weight: 700; font-size: 0.9em; }
