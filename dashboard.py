@@ -2883,7 +2883,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <div class="header">
   <h1>GPU Model Dashboard</h1>
-  <p>NVIDIA RTX PRO 6000 &middot; 96 GB VRAM</p>
+  <p id="header-gpu">&hellip;</p>
 </div>
 
 <div class="gpu-bar">
@@ -3483,6 +3483,7 @@ async function refreshGpu() {
     const vramGB = (g.vram_used / 1024).toFixed(1);
     const vramTotalGB = (g.vram_total / 1024).toFixed(0);
     document.getElementById('gpu-name').textContent = g.name;
+    document.getElementById('header-gpu').textContent = g.name + ' \u00b7 ' + vramTotalGB + ' GB VRAM';
     document.getElementById('gpu-vram').textContent = vramGB + ' GB';
     document.getElementById('gpu-vram-sub').textContent = 'of ' + vramTotalGB + ' GB (' + vramPct.toFixed(0) + '%)';
     document.getElementById('gpu-vram-bar').style.width = vramPct + '%';

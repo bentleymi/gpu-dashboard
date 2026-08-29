@@ -1927,6 +1927,7 @@ def test_page_markers():
         'id="b-topp"', 'id="b-repp"', 'id="b-reason"', 'id="b-think"',
         'id="b-template"', 'id="b-kv"', 'id="b-sampling-note"', 'id="b-warn"',
         'id="b-error"', 'id="b-docs"',
+        'id="header-gpu"',
         'function toggleBuilder', 'function loadFamilies', 'function onFamilyChange',
         'function onVariantChange', 'function onCtxChange', 'function renderWarn',
         'function advToggle', 'function saveCustomModel', 'function toast',
