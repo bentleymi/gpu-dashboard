@@ -34,6 +34,703 @@ processes: dict[str, subprocess.Popen] = {}
 log_files: dict[str, object] = {}
 op_lock = threading.Lock()
 
+# ── Model Config Builder ─────────────────────────────────────────
+import json
+import shutil
+import sys
+import datetime
+
+CUSTOM_MODELS_FILE = os.environ.get(
+    "DASHBOARD_CUSTOM_MODELS", "/mnt/raid1_nvme/JanusPro7b/custom_models.json")
+OPENCODE_CONFIG = os.environ.get(
+    "OPENCODE_CONFIG_PATH", "/root/.config/opencode/config.json")
+
+IK_LLAMA = "/mnt/raid1_nvme/models/ik_llama.cpp/build/bin/llama-server"
+QWEN38_LLAMA = "/mnt/raid1_nvme/Qwen3_8-27B/llama.cpp/build/bin/llama-server"
+VLLM_MAIN = "/mnt/raid1_nvme/Qwen3_8-27B/venv/bin/vllm"
+VLLM_LEGACY = "/mnt/raid1_sata/vllm-env/bin/vllm"
+NVFP4_36 = "/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4/venv/bin/vllm"
+NVFP4_38 = "/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4/venv/bin/vllm"
+PR27742_LLAMA = "/mnt/raid1_nvme/models/llama.cpp-pr27742/build/bin/llama-server"
+FLASH_ENV = {"FLASHINFER_DISABLE_VERSION_CHECK": "1"}
+PYTORCH_ENV = {"PYTORCH_ALLOC_CONF": "expandable_segments:True"}
+IK_CWD = "/mnt/raid1_nvme/models/ik_llama.cpp"
+
+
+def _fam(name, icon, color, tags, **kw):
+    e = {"name": name, "icon": icon, "color": color, "tags": tags,
+         "sources": [], "ctx_options": [], "docs_url": None, "scan_exclude": [],
+         "spec_draft": None, "templates": [], "default_template": "builtin",
+         "kv_cache": ["f16", "q8_0", "q4_0"],
+         "reasoning": {"supported": "unknown"}, "thinking": {"toggleable": "unknown"}}
+    e.update(kw)
+    return e
+
+
+def _llama(bin_=IK_LLAMA, cwd=IK_CWD, jinja=True):
+    return {"bin": bin_, "cwd": cwd, "jinja": jinja}
+
+
+def _vllm(binp, cwd, **kw):
+    return {"vllm": binp, "cwd": cwd, **kw}
+
+
+MODEL_FAMILIES = {
+    "qwen38-27b": _fam(
+        "Qwen3.8 27B", "sparkles", "#f97316", ["text-to-text", "text-to-code"],
+        base_dir="/mnt/raid1_nvme/Qwen3_8-27B", scan_engine="llama.cpp",
+        scan_exclude=["gguf-q8/mtp"],
+        spec_draft="gguf-q8/mtp/MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+        engines={
+            "llama.cpp": _llama(QWEN38_LLAMA, "/mnt/raid1_nvme/Qwen3_8-27B", jinja=False),
+            "vllm": _vllm(VLLM_MAIN, "/mnt/raid1_nvme/Qwen3_8-27B", dtype="half"),
+            "vllm-nvfp4": _vllm(NVFP4_38, "/mnt/raid1_nvme/models/Qwen3.8-27B-NVFP4",
+                                env=dict(FLASH_ENV)),
+        },
+        sources=[
+            {"id": "fp16", "kind": "dir", "path": "/mnt/raid1_nvme/Qwen3_8-27B/fp16",
+             "quant": "FP16", "engine": "vllm"},
+            {"id": "uncensored", "kind": "dir",
+             "path": "/mnt/raid1_nvme/Qwen3_8-27B/uncensored",
+             "quant": "FP16", "engine": "vllm",
+             "description": "orcarouter abliterated finetune"},
+            {"id": "nvfp4", "kind": "hf", "path": "unsloth/Qwen3.8-27B-NVFP4",
+             "quant": "NVFP4", "weights_gb": 16, "engine": "vllm-nvfp4"},
+        ],
+        ctx_options=[{"value": 262144, "label": "256K (native)", "kv_default": "f16",
+                      "per_variant": {"Q8_K_XL": {"vram": 46}, "Q6_K_XL": {"vram": 40}}}],
+        reasoning={"supported": True, "levels": ["low", "medium", "high"],
+                   "default": "medium"},
+        thinking={"toggleable": True, "default": True},
+        templates=["templates"],
+        default_template="templates/sharp-chat-template-v22.1.1.jinja"),
+    "qwen3-coder-next": _fam(
+        "Qwen3-Coder-Next", "code-2", "#10b981",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/qwen3-coder-next", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 131072, "label": "131K (native)", "kv_default": "f16"}],
+        reasoning={"supported": False}, thinking={"toggleable": False}),
+    "qwen36-35b-uncensored": _fam(
+        "Qwen3.6 35B Uncensored", "zap", "#f97316",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/qwen36-35b-uncensored", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[
+            {"value": 262144, "label": "256K (native)", "kv_default": "f16"},
+            {"value": 524288, "label": "512K (YaRN)", "yarn_orig": 262144,
+             "kv_default": "f16", "note": "YaRN-extended; quality may degrade past native"},
+            {"value": 1048576, "label": "1M (YaRN, q8 KV)", "yarn_orig": 262144,
+             "kv_default": "q8_0", "vram": 84,
+             "note": "YaRN-extended; needs most of VRAM"}],
+        thinking={"toggleable": True, "default": False}),
+    "davidau-40b": _fam(
+        "Qwen3.6-40B Deck Opus", "brain", "#818cf8",
+        ["text-to-text", "text-to-code", "agents", "claude"],
+        base_dir="/mnt/raid1_nvme/models/davidau-qwen3.6-40b", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[
+            {"value": 262144, "label": "256K (native)", "kv_default": "f16"},
+            {"value": 393216, "label": "384K (YaRN, q4 KV)", "yarn_orig": 262144,
+             "kv_default": "q4_0", "per_variant": {"Q8_0": {"vram": 81}},
+             "note": "YaRN-extended"},
+            {"value": 524288, "label": "512K (YaRN)", "yarn_orig": 262144,
+             "kv_default": "q8_0",
+             "per_variant": {"Q6_K": {"kv": "q4_0", "vram": 83},
+                             "Q8_0": {"kv": "q8_0", "vram": 96}},
+             "note": "YaRN-extended; needs the GPU to itself"},
+            {"value": 1048576, "label": "1M (YaRN, q8 KV)", "yarn_orig": 262144,
+             "kv_default": "q8_0", "per_variant": {"Q8_0": {"vram": 96}},
+             "note": "YaRN-extended; needs the GPU to itself"}],
+        thinking={"toggleable": False}),
+    "qwen35-122b": _fam(
+        "Qwen3.5 122B-A10B", "brain", "#22d3ee",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/qwen35-122b", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 262144, "label": "256K (native)", "kv_default": "f16"}]),
+    "minimax-m25": _fam(
+        "MiniMax M2.5", "rocket", "#06b6d4",
+        ["text-to-text", "text-to-code", "agents"],
+        base_dir="/mnt/raid1_nvme/models/minimax-m2.5", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 65536, "label": "64K (native)", "kv_default": "f16"}]),
+    "qwen36-27b-fable-fusion": _fam(
+        "Fable Fusion 711", "brain-circuit", "#a855f7",
+        ["text-to-text", "vision", "heretic", "mtp"],
+        base_dir="/mnt/raid1_nvme/models/qwen36-27b-fable-fusion", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[
+            {"value": 262144, "label": "256K (native)", "kv_default": "f16",
+             "per_variant": {"Q8_0": {"vram": 32}, "Q6_K": {"vram": 24}}},
+            {"value": 1048576, "label": "1M (YaRN, q8 KV)", "yarn_orig": 262144,
+             "kv_default": "q8_0", "per_variant": {"Q8_0": {"vram": 96}},
+             "note": "YaRN-extended; needs most of VRAM"}]),
+    "qwen36-27b-fable-amd": _fam(
+        "Fable Fusion (AMD)", "cpu", "#f97316",
+        ["text-to-text", "vision", "iq4_xs", "amd"],
+        base_dir="/mnt/raid1_nvme/models/qwen36-27b-fable-amd", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 262144, "label": "256K (native)", "kv_default": "f16",
+                      "vram": 18}],
+        reasoning={"supported": False}, thinking={"toggleable": False}),
+    "ornith-35b": _fam(
+        "Ornith 1.0 35B", "brain", "#f59e0b", ["llm", "gguf"],
+        base_dir="/mnt/raid1_nvme/models/Ornith-1.0-35B", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()}, ctx_options=[]),
+    "laguna-s21": _fam(
+        "Laguna S-2.1", "brain", "#7c3aed", ["llm", "gguf", "1m-context"],
+        base_dir="/mnt/raid1_nvme/models/Laguna-S-2.1", scan_engine="llama.cpp",
+        engines={"llama.cpp": _llama()},
+        ctx_options=[{"value": 1048576, "label": "1M (native)", "kv_default": "f16",
+                      "per_variant": {"Q8_0": {"vram": 96}, "Q4_K_M": {"vram": 96}}}]),
+    "qwen38-flash-next": _fam(
+        "Qwen3.8-Flash-Next 125B", "brain-circuit", "#06b6d4",
+        ["text-to-text", "vision", "moe", "125b", "qwen4exp"],
+        base_dir="/mnt/raid1_nvme/models/qwen38-flash-next", scan_engine="llama.cpp",
+        # 125B MoE multimodal (Qwen4Exp arch) — only the PR 27742 build loads it;
+        # vram from the user's builtin entries (88G/104G on disk + 262K ctx overhead)
+        engines={"llama.cpp": _llama(PR27742_LLAMA,
+                                     "/mnt/raid1_nvme/models/llama.cpp-pr27742")},
+        ctx_options=[{"value": 262144, "label": "262K (native)", "kv_default": "f16",
+                      "per_variant": {"IQ4_XS": {"vram": 94}, "Q4_K_XL": {"vram": 111}}}]),
+    "qwen36-27b": _fam(
+        "Qwen3.6 27B", "zap", "#f59e0b", ["text-to-text", "text-to-code"],
+        engines={
+            "vllm": _vllm(VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers",
+                          extra_flags=["--trust-remote-code"]),
+            "vllm-nvfp4": _vllm(NVFP4_36, "/mnt/raid1_nvme/models/Qwen3.6-27B-NVFP4",
+                                extra_flags=["--trust-remote-code"], env=dict(FLASH_ENV)),
+        },
+        sources=[
+            {"id": "bf16", "kind": "dir", "path": "/mnt/raid1_nvme/models/qwen36-27b",
+             "quant": "BF16", "engine": "vllm",
+             "ctx_options": [{"value": 131072, "label": "131K (native)",
+                              "kv_default": "f16"}]},
+            {"id": "nvfp4", "kind": "hf", "path": "unsloth/Qwen3.6-27B-NVFP4",
+             "quant": "NVFP4", "weights_gb": 16, "engine": "vllm-nvfp4",
+             "ctx_options": [{"value": 262144, "label": "256K (native)",
+                              "kv_default": "f16", "vram": 20}]},
+        ]),
+    "qwen36-35b": _fam(
+        "Qwen3.6 35B-A3B", "zap", "#38bdf8", ["text-to-text", "text-to-code"],
+        engines={"vllm": _vllm(VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers",
+                               extra_flags=["--trust-remote-code", "--enforce-eager"])},
+        sources=[
+            {"id": "bf16", "kind": "dir", "path": "/mnt/raid1_nvme/models/qwen36-35b",
+             "quant": "BF16", "engine": "vllm",
+             "ctx_options": [{"value": 131072, "label": "131K (native)",
+                              "kv_default": "f16"}]},
+        ]),
+    "qwen25-72b": _fam("Qwen 2.5 72B", "brain", "#818cf8", ["text-to-text"],
+                       engines={"vllm": _vllm(VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers")},
+                       sources=[{"id": "hf", "kind": "hf",
+                                 "path": "Qwen/Qwen2.5-72B-Instruct", "quant": "BF16",
+                                 "engine": "vllm",
+                                 "ctx_options": [{"value": 32768, "label": "32K",
+                                                  "kv_default": "f16"}]}]),
+    "qwen25-coder-32b": _fam("Qwen 2.5 Coder 32B", "code", "#a78bfa", ["text-to-code"],
+                             engines={"vllm": _vllm(VLLM_LEGACY,
+                                                    "/mnt/raid1_nvme/vllm-servers")},
+                             sources=[{"id": "hf", "kind": "hf",
+                                       "path": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                                       "quant": "BF16", "engine": "vllm",
+                                       "ctx_options": [{"value": 32768, "label": "32K",
+                                                        "kv_default": "f16"}]}]),
+    "llama33-70b": _fam("Llama 3.3 70B", "cpu", "#c084fc", ["text-to-text"],
+                        engines={"vllm": _vllm(VLLM_LEGACY,
+                                               "/mnt/raid1_nvme/vllm-servers")},
+                        sources=[{"id": "hf", "kind": "hf",
+                                  "path": "meta-llama/Llama-3.3-70B-Instruct",
+                                  "quant": "BF16", "engine": "vllm",
+                                  "ctx_options": [{"value": 32768, "label": "32K",
+                                                   "kv_default": "f16"}]}]),
+    "deepseek-r1-32b": _fam("DeepSeek R1 32B", "zap", "#e879f9",
+                            ["text-to-text", "reasoning"],
+                            engines={"vllm": _vllm(VLLM_LEGACY,
+                                                   "/mnt/raid1_nvme/vllm-servers")},
+                            sources=[{"id": "hf", "kind": "hf",
+                                      "path": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+                                      "quant": "BF16", "engine": "vllm",
+                                      "ctx_options": [{"value": 65536, "label": "64K",
+                                                       "kv_default": "f16"}]}]),
+    "deepseek-r1-70b": _fam("DeepSeek R1 70B", "flame", "#f472b6",
+                            ["text-to-text", "reasoning"],
+                            engines={"vllm": _vllm(VLLM_LEGACY,
+                                                   "/mnt/raid1_nvme/vllm-servers")},
+                            sources=[{"id": "hf", "kind": "hf",
+                                      "path": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+                                      "quant": "BF16", "engine": "vllm",
+                                      "ctx_options": [{"value": 32768, "label": "32K",
+                                                       "kv_default": "f16"}]}]),
+    "qwen35-27b-opus-reasoning": _fam("Qwen3.5 27B Opus Reasoning", "brain-circuit",
+                                      "#a855f7", ["text-to-text", "reasoning"],
+                                      engines={"vllm": _vllm(
+                                          VLLM_LEGACY, "/mnt/raid1_nvme/vllm-servers")},
+                                      sources=[{"id": "hf", "kind": "hf",
+                                                "path": "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+                                                "quant": "BF16", "engine": "vllm",
+                                                "ctx_options": [
+                                                    {"value": 32768, "label": "32K",
+                                                     "kv_default": "f16"}]}]),
+}
+
+QUANT_TOKENS = ["Q8_K_XL", "Q8_K_P", "Q6_K_XL", "Q6_K_P", "IQ3_KS", "IQ4_XS", "NVFP4",
+                "Q8_0", "Q6_K", "Q5_K_M", "Q4_K_XL", "Q4_K_M", "Q4_0", "BF16", "FP16"]
+
+
+def parse_quant(filename: str) -> str:
+    up = filename.upper()
+    for tok in QUANT_TOKENS:
+        if tok in up:
+            return tok
+    return "GGUF"
+
+
+def _scan_gguf_variants_in(root: str, engine_name: str, exclude: list) -> list:
+    """Group *.gguf files under root by quant token; shards → one variant."""
+    groups: dict = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        rel = os.path.relpath(dirpath, root).replace("\\", "/")
+        if any(ex.rstrip("/") + "/" in rel + "/" for ex in exclude):
+            continue
+        for fn in filenames:
+            if fn.lower().endswith(".gguf"):
+                groups.setdefault((rel, parse_quant(fn)), []).append(
+                    os.path.join(dirpath, fn))
+    out = []
+    for (_rel, q), paths in groups.items():
+        paths.sort()
+        first = next((p for p in paths if "-00001-of-" in os.path.basename(p)), paths[0])
+        size = sum(os.path.getsize(p) for p in paths)
+        gb = size / 1e9
+        out.append({
+            "id": f"gguf_{q.lower()}", "quant": q, "path": first,
+            "weights_gb": round(size / 1e9, 1), "engine": engine_name, "kind": "gguf",
+            "available": True,
+            "label": f"{q} · ~{gb:.0f} GB" + (" · shards" if len(paths) > 1 else ""),
+            "ctx_options": None,
+        })
+    return sorted(out, key=lambda v: v["quant"])
+
+
+def scan_gguf_variants(fid: str) -> list:
+    fam = MODEL_FAMILIES[fid]
+    eng_key = fam.get("scan_engine")
+    if not eng_key or not fam.get("base_dir"):
+        return []
+    return _scan_gguf_variants_in(fam["base_dir"], eng_key, fam.get("scan_exclude", []))
+
+
+def scan_sources(fid: str) -> list:
+    out = []
+    for s in MODEL_FAMILIES[fid].get("sources", []):
+        v = dict(s)
+        if s["kind"] == "dir":
+            try:
+                sts = [f for f in os.listdir(s["path"]) if f.endswith(".safetensors")]
+            except OSError:
+                sts = []
+            v["available"] = bool(sts)
+            if not v.get("weights_gb") and sts:
+                v["weights_gb"] = round(
+                    sum(os.path.getsize(os.path.join(s["path"], f)) for f in sts) / 1e9, 1)
+            gb = v.get("weights_gb")
+            v["label"] = (f'{s["quant"]} · ~{gb:.0f} GB' if gb else f'{s["quant"]} · vLLM dir')
+        else:
+            v["available"] = True
+            gb = s.get("weights_gb")
+            v["label"] = f'{s["quant"]} · HF' + (f" · ~{gb:.0f} GB" if gb else "")
+        v["ctx_options"] = s.get("ctx_options")
+        out.append(v)
+    return out
+
+
+def family_variants(fid: str) -> list:
+    return scan_gguf_variants(fid) + scan_sources(fid)
+
+
+def scan_templates(fid: str) -> list:
+    fam = MODEL_FAMILIES[fid]
+    found: list = []
+    for tdir in fam.get("templates", []):
+        try:
+            for n in sorted(os.listdir(os.path.join(fam["base_dir"], tdir))):
+                if n.endswith(".jinja") and "broken" not in n and n not in found:
+                    found.append(n)
+        except OSError:
+            continue
+    return found
+
+
+SAMPLING_DEFAULTS = {
+    "llama.cpp": {"temp": 0.8, "top_p": 0.95, "repeat_penalty": 1.10},
+    "vllm": {"temp": 1.0, "top_p": 1.0, "repeat_penalty": 1.0},
+    "vllm-nvfp4": {"temp": 1.0, "top_p": 1.0, "repeat_penalty": 1.0},
+}
+
+
+def _ctx_for_variant(fam: dict, variant: dict) -> list:
+    return variant.get("ctx_options") or fam.get("ctx_options", [])
+
+
+def _resolve_template_path(fid: str, template_val) -> str:
+    """Absolute .jinja path for the resolved template, or None ('builtin')."""
+    fam = MODEL_FAMILIES[fid]
+    val = template_val if template_val else fam.get("default_template", "builtin")
+    if val == "builtin":
+        return None
+    cand = os.path.join(fam["base_dir"], val)
+    if os.path.isfile(cand):
+        return cand
+    for tdir in fam.get("templates", []):
+        cand = os.path.join(fam["base_dir"], tdir, val)
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def resolve_advanced(fid: str, variant: dict, advanced: dict) -> tuple:
+    fam = MODEL_FAMILIES[fid]
+    errors: list = []
+    warnings: list = []
+    adv = advanced or {}
+
+    ctx = adv.get("ctx")
+    if isinstance(ctx, bool) or not isinstance(ctx, int) or not (4096 <= ctx <= 4194304):
+        errors.append({"field": "ctx",
+                       "message": "ctx must be an integer between 4096 and 4194304"})
+        return {}, errors, warnings
+
+    ctxopt = next((c for c in _ctx_for_variant(fam, variant) if c["value"] == ctx), None)
+    custom_ctx = ctxopt is None
+    if custom_ctx:
+        ctxopt = {"value": ctx, "label": f"{ctx // 1024}K", "kv_default": "f16"}
+        warnings.append(f"Context {ctx} is not a verified length for {fam['name']}")
+
+    per = ctxopt.get("per_variant", {}).get(variant["quant"], {})
+    is_llama = variant["engine"] == "llama.cpp"
+    engine = fam["engines"].get(variant["engine"], {})
+
+    # KV cache (llama.cpp only)
+    kv = adv.get("kv_cache") or per.get("kv") or ctxopt.get("kv_default", "f16")
+    if kv != "f16" and not is_llama:
+        errors.append({"field": "kv_cache",
+                       "message": "KV cache type only applies to llama.cpp models"})
+    if kv not in fam.get("kv_cache", ["f16"]):
+        errors.append({"field": "kv_cache",
+                       "message": "kv_cache must be one of " + ", ".join(fam.get("kv_cache", []))})
+
+    # Chat template
+    tmpl = adv.get("template")
+    if tmpl not in (None, "builtin") and tmpl != fam.get("default_template") \
+            and tmpl not in scan_templates(fid):
+        errors.append({"field": "template", "message": f"unknown template '{tmpl}'"})
+        tmpl = None
+    tmpl_path = _resolve_template_path(fid, tmpl)
+    llama_kwargs_ok = is_llama and (tmpl_path is not None or engine.get("jinja", False))
+
+    # Reasoning effort
+    rsup = fam.get("reasoning", {}).get("supported", "unknown")
+    rev = adv.get("reasoning_effort")
+    reasoning = None
+    if rsup is False:
+        if rev not in (None, "off"):
+            errors.append({"field": "reasoning_effort",
+                           "message": "this model has no configurable reasoning effort"})
+    elif rsup is True:
+        levels = fam["reasoning"].get("levels", ["low", "medium", "high"])
+        if rev is None:
+            reasoning = fam["reasoning"].get("default")
+        elif rev == "off":
+            reasoning = None
+        elif rev in levels:
+            reasoning = rev
+        else:
+            errors.append({"field": "reasoning_effort",
+                           "message": "level must be one of " + ", ".join(levels) + " or 'off'"})
+    else:  # unknown
+        if rev in (None, "off"):
+            reasoning = None
+        elif rev in ("low", "medium", "high"):
+            reasoning = rev
+            warnings.append("Reasoning level not verified for this model")
+        else:
+            errors.append({"field": "reasoning_effort",
+                           "message": "level must be low, medium, high or 'off'"})
+
+    # Thinking toggle
+    tcap = fam.get("thinking", {}).get("toggleable", "unknown")
+    tev = adv.get("enable_thinking")
+    thinking = None
+    if tcap is False:
+        if tev is not None:
+            errors.append({"field": "enable_thinking",
+                           "message": "this model has no thinking toggle"})
+    elif tcap is True:
+        thinking = bool(tev) if tev is not None else bool(fam["thinking"].get("default", False))
+    elif tev is not None:
+        thinking = bool(tev)
+        warnings.append("Thinking toggle not verified for this model")
+    if is_llama and thinking is not None and not llama_kwargs_ok:
+        errors.append({"field": "enable_thinking",
+                       "message": "thinking needs a Jinja chat template"})
+        thinking = None
+
+    # Sampling (emitted only when the user sets a value)
+    def _num(key: str, lo: float, hi: float, lo_excl: bool = False):
+        v = adv.get(key)
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            errors.append({"field": key, "message": f"{key} must be a number"})
+            return None
+        v = float(v)
+        if (v <= lo if lo_excl else v < lo) or v > hi:
+            errors.append({"field": key,
+                           "message": f"{key} must be in {'(' if lo_excl else '['}{lo}..{hi}]"})
+            return None
+        return v
+
+    temp = _num("temp", 0.0, 2.0)
+    top_p = _num("top_p", 0.0, 1.0, lo_excl=True)
+    repeat = _num("repeat_penalty", 0.0, 2.0, lo_excl=True)
+
+    resolved = {
+        "ctx": ctx,
+        "ctx_label": ctxopt.get("label") or f"{ctx // 1024}K",
+        "custom_ctx": custom_ctx,
+        "yarn_orig": ctxopt.get("yarn_orig"),
+        "kv": None if kv == "f16" else kv,
+        "template_path": tmpl_path,
+        "llama_kwargs_ok": llama_kwargs_ok,
+        "thinking": thinking,
+        "reasoning": reasoning,
+        "temp": temp, "top_p": top_p, "repeat_penalty": repeat,
+        "vram": per.get("vram", ctxopt.get("vram")),
+    }
+    return resolved, errors, warnings
+
+
+def make_alias(fid: str, variant: dict, ctx: int) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", f"{fid}_{variant['id']}_{ctx // 1024}k").strip("_")
+
+
+def build_launch_cmd(fid: str, variant: dict, resolved: dict, port: int, alias: str) -> tuple:
+    fam = MODEL_FAMILIES[fid]
+    engine = fam["engines"][variant["engine"]]
+    if variant["engine"] == "llama.cpp":
+        cmd = [engine["bin"], "--model", variant["path"], "--alias", alias,
+               "--ctx-size", str(resolved["ctx"]),
+               "-ngl", "99", "-b", "2048", "-ub", "2048",
+               "--host", "0.0.0.0", "--port", str(port), "--threads", "16"]
+        if resolved.get("yarn_orig"):
+            cmd += ["--rope-scaling", "yarn", "--yarn-orig-ctx", str(resolved["yarn_orig"])]
+        if resolved.get("kv"):
+            cmd += ["-ctk", resolved["kv"], "-ctv", resolved["kv"]]
+        if resolved.get("template_path"):
+            cmd += ["--chat-template-file", resolved["template_path"]]
+        elif engine.get("jinja"):
+            cmd.append("--jinja")
+        if fam.get("spec_draft") and engine["bin"] == QWEN38_LLAMA:
+            cmd += ["--spec-draft-model",
+                    os.path.join(fam["base_dir"], fam["spec_draft"]),
+                    "--spec-type", "draft-mtp", "--spec-draft-ngl", "99"]
+        if resolved.get("thinking") is not None:
+            cmd += ["--chat-template-kwargs",
+                    json.dumps({"enable_thinking": bool(resolved["thinking"])})]
+        if resolved.get("reasoning"):
+            cmd += ["--reasoning-effort", resolved["reasoning"]]
+        if resolved.get("temp") is not None:
+            cmd += ["--temp", f"{resolved['temp']:g}"]
+        if resolved.get("top_p") is not None:
+            cmd += ["--top-p", f"{resolved['top_p']:g}"]
+        if resolved.get("repeat_penalty") is not None:
+            cmd += ["--repeat-penalty", f"{resolved['repeat_penalty']:g}"]
+        return cmd, {}
+    cmd = [engine["vllm"], "serve", variant["path"], "--served-model-name", alias,
+           "--host", "0.0.0.0", "--port", str(port),
+           "--max-model-len", str(resolved["ctx"]),
+           "--gpu-memory-utilization", "0.90"]
+    if engine.get("dtype"):
+        cmd += ["--dtype", engine["dtype"]]
+    cmd += list(engine.get("extra_flags") or [])
+    if resolved.get("template_path"):
+        cmd += ["--chat-template", resolved["template_path"]]
+    kwargs = {}
+    if resolved.get("thinking") is not None:
+        kwargs["enable_thinking"] = bool(resolved["thinking"])
+    if resolved.get("reasoning"):
+        kwargs["reasoning_effort"] = resolved["reasoning"]
+    if kwargs:
+        cmd += ["--default-chat-template-kwargs", json.dumps(kwargs)]
+    env = {**PYTORCH_ENV, **(engine.get("env") or {})}
+    return cmd, env
+
+
+def build_custom_entry(fid: str, variant: dict, resolved: dict, body: dict,
+                       port: int) -> tuple:
+    fam = MODEL_FAMILIES[fid]
+    alias = make_alias(fid, variant, resolved["ctx"])
+    entry_id = "cust_" + alias
+    cmd, env = build_launch_cmd(fid, variant, resolved, port, alias)
+    entry = {
+        "id": entry_id,
+        "name": f'{fam["name"]} ({variant["quant"]}, {resolved["ctx"] // 1024}K ctx)',
+        "description": (body.get("description") or "").strip()
+                       or f'{variant["label"]} \u00b7 {variant["engine"]}',
+        "port": port,
+        "cmd": cmd,
+        "cwd": fam["engines"][variant["engine"]].get("cwd", "/"),
+        "env": env,
+        "protocol": "http",
+        "category": "LLM",
+        "icon": fam["icon"],
+        "color": fam["color"],
+        "tags": (body.get("tags") or []) or list(fam.get("tags", [])),
+        "supports_offload": variant["engine"] != "llama.cpp",
+        "vram_gb": resolved.get("vram") or variant.get("weights_gb"),
+        "quant": variant["quant"],
+        "custom": True,
+        "custom_ref": {"family": fid, "variant": variant["id"], "ctx": resolved["ctx"]},
+        "opencode": {"provider": f"{alias}-{port}", "model_id": alias},
+    }
+    return entry_id, entry
+
+
+CUSTOM_IDS: set = set()
+
+
+def load_custom_entries(path: str) -> list:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        assert isinstance(data, list)
+        return data
+    except Exception as e:
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        try:
+            os.replace(path, path + f".corrupt-{ts}")
+        except OSError:
+            pass
+        print(f"[builder] {path} unreadable ({e}); continuing with built-ins only",
+              file=sys.stderr)
+        return []
+
+
+def save_custom_entries(path: str, entries: list) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(entries, f, indent=2)
+    os.replace(tmp, path)
+
+
+def merge_custom_at_startup() -> None:
+    for entry in load_custom_entries(CUSTOM_MODELS_FILE):
+        mid = entry.get("id")
+        if not mid:
+            continue
+        if mid in MODELS and mid not in CUSTOM_IDS:
+            print(f"[builder] custom {mid} collides with existing entry; skipped",
+                  file=sys.stderr)
+            continue
+        MODELS[mid] = entry
+        CUSTOM_IDS.add(mid)
+
+
+def alloc_port() -> int:
+    # is_port_open() is defined further down in dashboard.py — fine, called at runtime
+    busy = {m["port"] for m in MODELS.values()}
+    for port in range(8100, 8200):
+        if port not in busy and not is_port_open(port):
+            return port
+    raise RuntimeError("no free ports in 8100-8199")
+
+
+merge_custom_at_startup()
+
+
+def opencode_backup(path: str) -> None:
+    if not os.path.exists(path):
+        return
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(path, path + f".bak-{ts}")
+    base, fname = os.path.split(path)
+    baks = sorted(f for f in os.listdir(base) if f.startswith(fname + ".bak-"))
+    for old in baks[:-10]:
+        try:
+            os.remove(os.path.join(base, old))
+        except OSError:
+            pass
+
+
+def opencode_patch(alias: str, port: int, name: str, ctx: int, options: dict):
+    path = OPENCODE_CONFIG
+    if not os.path.exists(path):
+        return "opencode config not found — saved to the dashboard only"
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except Exception as e:
+        return f"opencode config unreadable ({e}) — saved to the dashboard only"
+    opencode_backup(path)
+    providers = cfg.setdefault("provider", {})
+    url = f"http://localhost:{port}/v1"
+    provider_id = f"{alias}-{port}"
+    for pid, p in list(providers.items()):
+        if (p.get("options") or {}).get("baseURL") == url:
+            provider_id = pid
+            break
+    provider = providers.get(provider_id) or {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider_id,
+        "options": {"baseURL": url, "apiKey": "local", "setCacheKey": False,
+                    "timeout": False},
+        "models": {},
+    }
+    block = {"name": name, "limit": {"context": ctx, "output": 32768}}
+    if options:
+        block["options"] = options
+    provider.setdefault("models", {})[alias] = block
+    providers[provider_id] = provider
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        return f"opencode config write failed ({e}) — saved to the dashboard only"
+    return None
+
+
+def opencode_unpatch(provider_id: str, alias: str) -> None:
+    path = OPENCODE_CONFIG
+    if not os.path.exists(path) or not provider_id or not alias:
+        return
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except Exception:
+        return
+    providers = cfg.get("provider", {})
+    changed = False
+    if provider_id in providers:
+        models = providers[provider_id].get("models", {})
+        if alias in models:
+            del models[alias]
+            changed = True
+        if not models and provider_id.startswith(alias):
+            del providers[provider_id]
+            changed = True
+    if changed:
+        opencode_backup(path)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(tmp, path)
+
 app = FastAPI()
 
 # ── Power tracking ────────────────────────────────────────────────
@@ -273,10 +970,17 @@ def api_status():
             "token_usage": usage,
             "quant": get_quant(model),
             "vram_gb": model.get("vram_gb"),
+            "custom": model.get("custom", False),
             **get_model_status(model_id),
         }
     return JSONResponse(result)
 
+
+def is_vllm_cmd(cmd: list) -> bool:
+    """True for vllm CLI form and module form (python -m vllm...)."""
+    if not cmd:
+        return False
+    return cmd[0].endswith("vllm") or (len(cmd) > 2 and cmd[1] == "-m" and "vllm" in cmd[2])
 
 @app.post("/api/start/{model_id}")
 def api_start(model_id: str, offload: bool = False):
@@ -312,7 +1016,7 @@ def api_start(model_id: str, offload: bool = False):
 
         if offload and model.get("supports_offload"):
             # vLLM models: add --cpu-offload-gb flag
-            if cmd[0].endswith("vllm"):
+            if is_vllm_cmd(cmd):
                 cmd.extend(["--cpu-offload-gb", "24"])
             else:
                 # Gradio/other apps: set env var for the app to check
@@ -421,6 +1125,111 @@ def api_logs(model_id: str):
             except Exception:
                 pass
     return JSONResponse({"logs": text})
+
+
+def _family_payload(fid: str) -> dict:
+    fam = MODEL_FAMILIES[fid]
+    variants = [{
+        "id": v["id"], "label": v["label"], "engine": v["engine"], "quant": v["quant"],
+        "weights_gb": v.get("weights_gb"), "available": v.get("available", True),
+        "ctx_options": _ctx_for_variant(fam, v),
+        **({"description": v["description"]} if v.get("description") else {}),
+    } for v in family_variants(fid)]
+    return {
+        "id": fid,
+        "name": fam["name"],
+        "docs_url": fam.get("docs_url"),
+        "icon": fam["icon"],
+        "color": fam["color"],
+        "engines": sorted({v["engine"] for v in variants if v["available"]}),
+        "variants": variants,
+        "reasoning": fam.get("reasoning", {}),
+        "thinking": fam.get("thinking", {}),
+        "templates": ["builtin"] + scan_templates(fid),
+        "default_template": fam.get("default_template", "builtin"),
+        "kv_cache": list(fam.get("kv_cache", []))
+                    if any(v["engine"] == "llama.cpp" for v in variants) else [],
+        "sampling_defaults": SAMPLING_DEFAULTS,
+        "tags": fam.get("tags", []),
+    }
+
+
+@app.get("/api/families")
+def api_families():
+    return JSONResponse([_family_payload(fid) for fid in MODEL_FAMILIES])
+
+
+def opencode_options(resolved: dict) -> dict:
+    opts = {}
+    if resolved.get("temp") is not None:
+        opts["temperature"] = resolved["temp"]
+    if resolved.get("top_p") is not None:
+        opts["topP"] = resolved["top_p"]
+    if resolved.get("repeat_penalty") is not None:
+        opts["repetitionPenalty"] = resolved["repeat_penalty"]
+    return opts
+
+
+@app.post("/api/custom-model")
+def api_custom_model_create(body: dict):
+    fid = body.get("family")
+    if fid not in MODEL_FAMILIES:
+        return JSONResponse({"field": "family", "message": "unknown family"}, status_code=400)
+    variant = next((v for v in family_variants(fid) if v["id"] == body.get("variant")), None)
+    if variant is None:
+        return JSONResponse({"field": "variant", "message": "unknown variant"}, status_code=400)
+    if not variant.get("available", True):
+        return JSONResponse({"field": "variant", "message": "weights missing on disk"},
+                            status_code=400)
+    resolved, errors, warnings = resolve_advanced(
+        fid, variant, {** (body.get("advanced") or {}), "ctx": body.get("ctx")})
+    if errors:
+        return JSONResponse({"field": errors[0]["field"], "message": errors[0]["message"]},
+                            status_code=400)
+    entry_id = "cust_" + make_alias(fid, variant, resolved["ctx"])
+    with op_lock:
+        if entry_id in MODELS:
+            return JSONResponse({"field": "variant",
+                                 "message": f"already exists as {entry_id}"}, status_code=400)
+        try:
+            port = alloc_port()
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+        # build_custom_entry returns (entry_id, entry) — id already computed above for the dup check
+        _, entry = build_custom_entry(fid, variant, resolved, body, port)
+        entries = load_custom_entries(CUSTOM_MODELS_FILE)
+        entries.append(entry)
+        try:
+            save_custom_entries(CUSTOM_MODELS_FILE, entries)   # commit point
+        except Exception as e:
+            return JSONResponse({"error": f"custom_models.json write failed: {e}"},
+                                status_code=500)
+        MODELS[entry_id] = entry
+        CUSTOM_IDS.add(entry_id)
+    warn = opencode_patch(entry["opencode"]["model_id"], port, entry["name"],
+                          resolved["ctx"], opencode_options(resolved))
+    resp = {"entry": entry, "warnings": warnings}
+    if warn:
+        resp["opencode_warning"] = warn
+    return JSONResponse(resp)
+
+
+@app.delete("/api/custom-model/{model_id}")
+def api_custom_model_delete(model_id: str):
+    model = MODELS.get(model_id)
+    if model is None or not model.get("custom"):
+        return JSONResponse({"error": "not a custom model"}, status_code=404)
+    api_stop(model_id)          # stop first, WITHOUT holding op_lock (api_stop takes it)
+    with op_lock:
+        MODELS.pop(model_id, None)
+        CUSTOM_IDS.discard(model_id)
+        entries = load_custom_entries(CUSTOM_MODELS_FILE)
+        save_custom_entries(CUSTOM_MODELS_FILE,
+                            [e for e in entries if e.get("id") != model_id])
+    oc = model.get("opencode")
+    if oc:
+        opencode_unpatch(oc.get("provider", ""), oc.get("model_id", ""))
+    return JSONResponse({"message": "Deleted"})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -780,13 +1589,40 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .footer {
     text-align: center; padding: 24px; color: #3f3f46; font-size: 0.75em;
   }
+  .builder { background: #1a1b23; border: 1px solid #27272a; border-radius: 8px; max-width: 1160px; margin: 24px auto 12px; overflow: hidden; }
+  .builder-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; cursor: pointer; user-select: none; }
+  .builder-head:hover { background: #1f2028; }
+  .builder-title { font-weight: 700; font-size: 0.9em; }
+  .builder-chev { color: #52525b; }
+  .builder-body { padding: 4px 14px 14px; }
+  .builder-body.collapsed { display: none; }
+  .builder-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+  .builder-row.right { justify-content: flex-end; }
+  .builder-row label { display: flex; align-items: center; gap: 6px; color: #a1a1aa; font-size: 0.82em; }
+  .builder-row .grow { flex: 1 1 260px; }
+  .builder-row .grow input { width: 100%; }
+  .builder-row input[type=number], .builder-row select { background: #111218; color: #e4e4e7; border: 1px solid #27272a; border-radius: 6px; padding: 5px 8px; font-size: 0.85em; }
+  .builder-row input[type=number] { width: 110px; }
+  .builder-adv-head { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; color: #a1a1aa; font-size: 0.82em; cursor: pointer; }
+  .builder-adv { background: #14151b; border: 1px solid #27272a; border-radius: 6px; padding: 0 10px 4px; margin-top: 4px; }
+  .builder-adv.collapsed { display: none; }
+  .builder-note { color: #eab308; font-size: 0.75em; }
+  .builder-warn { margin-top: 10px; }
+  .builder-warn div { color: #eab308; font-size: 0.78em; padding: 2px 0; }
+  .builder-error { color: #f87171; font-size: 0.78em; margin-top: 8px; min-height: 1em; }
+  .builder-save { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-size: 0.85em; font-weight: 600; cursor: pointer; }
+  .builder-save:hover { background: #1d4ed8; }
+  .custom-badge { display: inline-block; background: #2563eb22; color: #60a5fa; border-radius: 4px; font-size: 0.7em; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+  .del-btn { cursor: pointer; color: #52525b; margin-left: 6px; font-size: 0.8em; vertical-align: middle; }
+  .del-btn:hover { color: #f87171; }
+  .builder-toast { position: fixed; bottom: 20px; right: 20px; background: #14532d; color: #bbf7d0; border: 1px solid #166534; padding: 10px 16px; border-radius: 8px; font-size: 0.85em; z-index: 99; }
 </style>
 </head>
 <body>
 
 <div class="header">
   <h1>GPU Model Dashboard</h1>
-  <p>NVIDIA RTX PRO 6000 &middot; 96 GB VRAM</p>
+  <p id="header-gpu">&hellip;</p>
 </div>
 
 <div class="gpu-bar">
@@ -888,6 +1724,47 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<div class="builder" id="builder">
+  <div class="builder-head" onclick="toggleBuilder()">
+    <span class="builder-title">+ New Model Config</span>
+    <span class="builder-chev" id="builder-chev">&#9656;</span>
+  </div>
+  <div class="builder-body collapsed" id="builder-body">
+    <div class="builder-row">
+      <label>Model family
+        <select id="b-family" onchange="onFamilyChange()"></select>
+        <a id="b-docs" target="_blank" rel="noopener" hidden>docs &#8599;</a>
+      </label>
+      <label>Quant <select id="b-variant" onchange="onVariantChange()"></select></label>
+      <label>Context <select id="b-ctx" onchange="onCtxChange()"></select></label>
+      <input type="number" id="b-ctx-custom" min="4096" max="4194304" step="1024" placeholder="tokens" hidden>
+    </div>
+    <div class="builder-row">
+      <label class="grow">Description <input type="text" id="b-desc" placeholder="(auto-generated if blank)"></label>
+      <label class="grow">Tags <input type="text" id="b-tags" placeholder="comma, separated"></label>
+    </div>
+    <label class="builder-adv-head"><input type="checkbox" id="b-adv" onchange="advToggle()"> Advanced</label>
+    <div class="builder-adv collapsed" id="b-adv-body">
+      <div class="builder-row">
+        <label>Temp <input type="number" id="b-temp" step="0.05" min="0" max="2" placeholder=""></label>
+        <label>Top P <input type="number" id="b-topp" step="0.01" min="0.01" max="1" placeholder=""></label>
+        <label>Repeat penalty <input type="number" id="b-repp" step="0.01" min="0.01" max="2" placeholder=""></label>
+        <span class="builder-note" id="b-sampling-note" hidden>applied via your opencode client, not the server</span>
+      </div>
+      <div class="builder-row">
+        <label>Reasoning effort <select id="b-reason"></select></label>
+        <label>Thinking <input type="checkbox" id="b-think"></label>
+        <label>Chat template <select id="b-template"></select></label>
+        <label>KV cache <select id="b-kv"></select></label>
+      </div>
+    </div>
+    <div id="b-warn" class="builder-warn"></div>
+    <div id="b-error" class="builder-error"></div>
+    <div class="builder-row right">
+      <button class="builder-save" onclick="saveCustomModel()">Save as custom config</button>
+    </div>
+  </div>
+</div>
 <div class="table-bar">
   <input type="search" class="search-input" id="search" placeholder="Search models, tags, ports, quant…">
   <span class="table-count" id="table-count"></span>
@@ -1012,7 +1889,7 @@ function buildRow(id, m) {
   tr.className = 'model-row';
   const initial = (m.name || '?').trim().charAt(0);
   tr.innerHTML = `
-    <td class="td-name"><span class="row-icon" style="background:${m.color}18;color:${m.color}">${initial}</span><a class="name-link" id="link-${id}" target="_blank" rel="noopener">${m.name}</a></td>
+    <td class="td-name"><span class="row-icon" style="background:${m.color}18;color:${m.color}">${initial}</span><a class="name-link" id="link-${id}" target="_blank" rel="noopener">${m.name}</a>${m.custom ? `<span class="custom-badge">custom</span><span class="del-btn" title="delete custom config" onclick="event.stopPropagation();delCustom('${id}')">&#10005;</span>` : ""}</td>
     <td class="mono">${m.quant || '—'}</td>
     <td class="mono">${m.vram_gb ? '~' + m.vram_gb + ' GB' : '—'}</td>
     <td class="mono">${m.port}</td>
@@ -1345,6 +2222,7 @@ async function refreshGpu() {
     const vramGB = (g.vram_used / 1024).toFixed(1);
     const vramTotalGB = (g.vram_total / 1024).toFixed(0);
     document.getElementById('gpu-name').textContent = g.name;
+    document.getElementById('header-gpu').textContent = g.name + ' \u00b7 ' + vramTotalGB + ' GB VRAM';
     document.getElementById('gpu-vram').textContent = vramGB + ' GB';
     document.getElementById('gpu-vram-sub').textContent = 'of ' + vramTotalGB + ' GB (' + vramPct.toFixed(0) + '%)';
     document.getElementById('gpu-vram-bar').style.width = vramPct + '%';
@@ -1359,6 +2237,192 @@ async function refreshGpu() {
     document.getElementById('gpu-power-bar').style.width = (g.power / g.power_limit * 100) + '%';
     updateCost();
   } catch(e) {}
+}
+
+// ── Model Config Builder ──
+let FAMILY_CACHE = null;
+let CUR_FAM = null;
+
+function toggleBuilder() {
+  const body = document.getElementById('builder-body');
+  const open = body.classList.contains('collapsed');
+  body.classList.toggle('collapsed', !open);
+  document.getElementById('builder-chev').textContent = open ? '\u25be' : '\u25b8';
+  if (open && !FAMILY_CACHE) loadFamilies();
+}
+
+async function loadFamilies() {
+  const r = await fetch('/api/families');
+  FAMILY_CACHE = await r.json();
+  document.getElementById('b-family').innerHTML =
+    FAMILY_CACHE.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
+  onFamilyChange();
+}
+
+function onFamilyChange() {
+  const f = FAMILY_CACHE.find(x => x.id === document.getElementById('b-family').value);
+  CUR_FAM = f;
+  const docs = document.getElementById('b-docs');
+  if (f.docs_url) { docs.href = f.docs_url; docs.hidden = false; } else { docs.hidden = true; }
+  document.getElementById('b-variant').innerHTML = f.variants.map(
+    v => `<option value="${v.id}"${v.available ? '' : ' disabled'}>${v.label}${v.available ? '' : ' (weights missing)'}</option>`
+  ).join('');
+  document.getElementById('b-tags').placeholder = (f.tags || []).join(', ');
+  onVariantChange();
+}
+
+function curVariant() {
+  if (!CUR_FAM) return null;
+  return CUR_FAM.variants.find(v => v.id === document.getElementById('b-variant').value) || null;
+}
+
+function onVariantChange() {
+  const v = curVariant();
+  if (!v) return;
+  const isLlama = v.engine === 'llama.cpp';
+  document.getElementById('b-ctx').innerHTML = (v.ctx_options || []).map(
+    c => `<option value="${c.value}">${c.label}</option>`
+  ).join('') + '<option value="custom">Custom\u2026</option>';
+  const sd = (CUR_FAM.sampling_defaults || {})[v.engine] || {};
+  document.getElementById('b-temp').placeholder = (sd.temp != null) ? String(sd.temp) : '';
+  document.getElementById('b-topp').placeholder = (sd.top_p != null) ? String(sd.top_p) : '';
+  document.getElementById('b-repp').placeholder = (sd.repeat_penalty != null) ? String(sd.repeat_penalty) : '';
+  document.getElementById('b-sampling-note').hidden = !String(v.engine).startsWith('vllm');
+  const kSel = document.getElementById('b-kv');
+  kSel.hidden = !isLlama;
+  kSel.innerHTML = (isLlama ? (CUR_FAM.kv_cache || ['f16']) : ['f16'])
+    .map(k => `<option value="${k}">${k}</option>`).join('');
+  kSel.value = 'f16';
+  // template options: the family default (file or 'builtin') first, labelled "default",
+  // then every other on-disk .jinja file (basenames)
+  const tSel = document.getElementById('b-template');
+  const tOpts = [];
+  if (CUR_FAM.default_template !== 'builtin') {
+    tOpts.push(`<option value="${CUR_FAM.default_template}">default (${CUR_FAM.default_template.split('/').pop()})</option>`);
+  }
+  tOpts.push(`<option value="builtin">${CUR_FAM.default_template !== 'builtin' ? 'engine template (builtin)' : 'default (engine template)'}</option>`);
+  for (const t of CUR_FAM.templates) {
+    if (t === 'builtin' || t === CUR_FAM.default_template) continue;
+    tOpts.push(`<option value="${t}">${t.split('/').pop()}</option>`);
+  }
+  tSel.innerHTML = tOpts.join('');
+  const rs = CUR_FAM.reasoning || {};
+  const rSel = document.getElementById('b-reason');
+  if (rs.supported === false) { rSel.hidden = true; rSel.innerHTML = ''; }
+  else {
+    rSel.hidden = false;
+    const levels = rs.supported === true ? (rs.levels || ['low', 'medium', 'high']) : ['low', 'medium', 'high'];
+    let opts = '';
+    if (rs.supported === true) opts += `<option value="">default (${rs.default || 'engine'})</option>`;
+    opts += levels.map(l => `<option value="${l}">${l}</option>`).join('')
+      + '<option value="off">off (no flag)</option>';
+    rSel.innerHTML = opts;
+  }
+  const tc = CUR_FAM.thinking || {};
+  const th = document.getElementById('b-think');
+  th.disabled = tc.toggleable === false;
+  th.checked = tc.default === true;
+  onCtxChange();
+}
+
+function onCtxChange() { renderWarn(); }
+
+function renderWarn() {
+  const el = document.getElementById('b-warn');
+  const v = curVariant();
+  if (!v || !CUR_FAM) { el.innerHTML = ''; return; }
+  const warns = [];
+  const selVal = document.getElementById('b-ctx').value;
+  const custom = (selVal === 'custom');
+  document.getElementById('b-ctx-custom').hidden = !custom;
+  if (custom) {
+    warns.push('Context length is not a verified length for this model.');
+  } else {
+    const c = (v.ctx_options || []).find(x => String(x.value) === selVal);
+    if (c && c.note) warns.push(c.note);
+  }
+  const rs = CUR_FAM.reasoning || {};
+  const rv = document.getElementById('b-reason').value;
+  if (rs.supported === 'unknown' && rv && rv !== 'off')
+    warns.push('Reasoning level not verified for this model.');
+  const tc = CUR_FAM.thinking || {};
+  if (tc.toggleable === 'unknown' && document.getElementById('b-think').checked)
+    warns.push('Thinking toggle not verified for this model.');
+  el.innerHTML = warns.map(w => `<div>\u26a0 ${w}</div>`).join('');
+}
+
+function advToggle() {
+  document.getElementById('b-adv-body').classList.toggle(
+    'collapsed', !document.getElementById('b-adv').checked);
+}
+
+async function saveCustomModel() {
+  const errEl = document.getElementById('b-error');
+  errEl.textContent = '';
+  const v = curVariant();
+  if (!v || !v.available) { errEl.textContent = 'Pick a model family and an available quant.'; return; }
+  const selVal = document.getElementById('b-ctx').value;
+  const ctx = (selVal === 'custom')
+    ? parseInt(document.getElementById('b-ctx-custom').value, 10)
+    : parseInt(selVal, 10);
+  if (!ctx || ctx < 4096 || ctx > 4194304) {
+    errEl.textContent = 'Enter a valid context length (4096\u20134194304) for "Custom\u2026".';
+    return;
+  }
+  const num = id => {
+    const x = document.getElementById(id).value.trim();
+    return x === '' ? null : parseFloat(x);
+  };
+  const tc = CUR_FAM.thinking || {};
+  const th = document.getElementById('b-think');
+  const rSel = document.getElementById('b-reason');
+  const kSel = document.getElementById('b-kv');
+  const tSel = document.getElementById('b-template');
+  const body = {
+    family: CUR_FAM.id,
+    variant: v.id,
+    ctx,
+    description: document.getElementById('b-desc').value.trim(),
+    tags: document.getElementById('b-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+    advanced: {
+      temp: num('b-temp'),
+      top_p: num('b-topp'),
+      repeat_penalty: num('b-repp'),
+      reasoning_effort: (rSel.hidden || rSel.value === '') ? null : rSel.value,
+      enable_thinking: tc.toggleable === false ? null
+        : (tc.toggleable === true ? th.checked : (th.checked ? true : null)),
+      template: (tSel.hidden || tSel.value === 'builtin') ? null : tSel.value,
+      kv_cache: (kSel.hidden || kSel.value === 'f16') ? null : kSel.value,
+    },
+  };
+  const r = await fetch('/api/custom-model', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status !== 200) { errEl.textContent = j.message || JSON.stringify(j); return; }
+  document.getElementById('b-desc').value = '';
+  toast('Saved \u2014 ' + j.entry.name
+    + (j.opencode_warning ? ' \u00b7 \u26a0 ' + j.opencode_warning : ''), !!j.opencode_warning);
+  refresh();
+}
+
+function toast(msg, warn) {
+  const t = document.createElement('div');
+  t.className = 'builder-toast';
+  if (warn) { t.style.background = '#422006'; t.style.color = '#fde68a'; t.style.borderColor = '#713f12'; }
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+async function delCustom(id) {
+  const name = (currentModels && currentModels[id]) ? currentModels[id].name : id;
+  if (!confirm(`Delete \u2018${name}\u2019? Removes the config and its opencode entry; stops it if running.`)) return;
+  const r = await fetch('/api/custom-model/' + id, { method: 'DELETE' });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) { toast('Deleted ' + name); refresh(); }
+  else { toast('Delete failed: ' + (j.error || r.status), true); }
 }
 
 refresh();
