@@ -6,6 +6,7 @@ SCRATCH = "/tmp/builder-tests"
 os.makedirs(SCRATCH, exist_ok=True)
 os.environ["DASHBOARD_CUSTOM_MODELS"] = os.path.join(SCRATCH, "custom_models.json")
 os.environ["OPENCODE_CONFIG_PATH"] = os.path.join(SCRATCH, "opencode_config.json")
+os.environ["DASHBOARD_MODELS_LOCAL"] = os.path.join(SCRATCH, "models_local.json")
 
 sys.path.insert(0, "/mnt/raid1_nvme/JanusPro7b")
 
